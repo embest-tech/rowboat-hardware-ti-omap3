@@ -71,11 +71,6 @@ OSCL_EXPORT_REF AndroidSurfaceOutputOmap34xx::AndroidSurfaceOutputOmap34xx() :
     mIsFirstFrame = true;
     mbufferAlloc.buffer_address = NULL;
     mConvert = false;
-
-    // Holding more than one video frames can sometimes starve the
-    // overlay-based decoder video sink; thus we overwrite the
-    // default value in the base class.
-    mNumberOfFramesToHold = 1;
 }
 
 OSCL_EXPORT_REF AndroidSurfaceOutputOmap34xx::~AndroidSurfaceOutputOmap34xx()
@@ -286,20 +281,20 @@ void AndroidSurfaceOutputOmap34xx::setParametersSync(PvmiMIOSession aSession,
             uint8* data = (uint8*)aParameters->value.key_specific_value;
             PVMFYuvFormatSpecificInfo0* yuvInfo = (PVMFYuvFormatSpecificInfo0*)data;
 
-            iVideoWidth = (int32)yuvInfo->width;
+            iVideoWidth = (int32)yuvInfo->buffer_width;
             iVideoParameterFlags |= VIDEO_WIDTH_VALID;
             LOGV("AndroidSurfaceOutputOmap34xx::setParametersSync() Video Width, Value %d", iVideoWidth);
 
-            iVideoHeight = (int32)yuvInfo->height;
+            iVideoHeight = (int32)yuvInfo->buffer_height;
             iVideoParameterFlags |= VIDEO_HEIGHT_VALID;
             LOGV("AndroidSurfaceOutputOmap34xx::setParametersSync() Video Height, Value %d", iVideoHeight);
 
-            iVideoDisplayHeight = (int32)yuvInfo->display_height;
+            iVideoDisplayHeight = (int32)yuvInfo->viewable_height;
             iVideoParameterFlags |= DISPLAY_HEIGHT_VALID;
             LOGV("AndroidSurfaceOutputOmap34xx::setParametersSync() Video Display Height, Value %d", iVideoDisplayHeight);
 
 
-            iVideoDisplayWidth = (int32)yuvInfo->display_width;
+            iVideoDisplayWidth = (int32)yuvInfo->viewable_width;
             iVideoParameterFlags |= DISPLAY_WIDTH_VALID;
             LOGV("AndroidSurfaceOutputOmap34xx::setParametersSync() Video Display Width, Value %d", iVideoDisplayWidth);
 
