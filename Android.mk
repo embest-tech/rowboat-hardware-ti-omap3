@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+
+#Don't use hw acceleration in this branch of the project
 ifeq ($(TARGET_BOARD_PLATFORM),omap3)
-  include $(all-subdir-makefiles)
+#  include $(all-subdir-makefiles)
 endif
