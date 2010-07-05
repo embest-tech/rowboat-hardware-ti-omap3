@@ -5,7 +5,7 @@ include $(CLEAR_VARS)
 include external/opencore/Config.mk
 LOCAL_C_INCLUDES := \
     $(PV_INCLUDES) \
-	external/ti-dsp/dvsdk_3_00_02_44/omx_ti/include
+	external/ti-dsp/dvsdk_3_01_00_06/omx_ti/include
 
 LOCAL_SRC_FILES := \
 	surface-dmai.cpp
