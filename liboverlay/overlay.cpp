@@ -38,15 +38,21 @@ extern "C" {
 #include <cutils/atomic.h>
 
 /*****************************************************************************/
+#if 0
+#undef LOGV
+#define LOGV LOGD
+#undef LOGI
+#define LOGI LOGD
+#endif
 
 #define LOG_FUNCTION_NAME LOGV(" %s %s",  __FILE__, __FUNCTION__)
 
-#define NUM_OVERLAY_BUFFERS_REQUESTED  (8)
+#define NUM_OVERLAY_BUFFERS_REQUESTED  (3)
 #define SHARED_DATA_MARKER             (0x68759746) // OVRLYSHM on phone keypad
 
 /* These values should come from Surface Flinger */
-#define LCD_WIDTH 480
-#define LCD_HEIGHT 854
+#define LCD_WIDTH 720//480
+#define LCD_HEIGHT 576 //854
 
 #define CACHEABLE_BUFFERS 0x1
 
@@ -103,6 +109,7 @@ struct overlay_data_context_t {
     /* our private state goes below here */
     int ctl_fd;
     int shared_fd;
+    int resizer_fd;
     int shared_size;
     int width;
     int height;
@@ -157,6 +164,7 @@ struct handle_t : public native_handle {
     /* add the data fields we need here, for instance: */
     int ctl_fd;
     int shared_fd;
+    int resizer_fd;
     int width;
     int height;
     int format;
@@ -174,6 +182,10 @@ static int handle_ctl_fd(const overlay_handle_t overlay) {
 
 static int handle_shared_fd(const overlay_handle_t overlay) {
     return static_cast<const struct handle_t *>(overlay)->shared_fd;
+}
+
+static int handle_resizer_fd(const overlay_handle_t overlay) {
+    return static_cast<const struct handle_t *>(overlay)->resizer_fd;
 }
 
 static int handle_num_buffers(const overlay_handle_t overlay) {
@@ -207,14 +219,15 @@ class overlay_object : public overlay_t
     }
 
 public:
-    overlay_object(int ctl_fd, int shared_fd, int shared_size, int w, int h,
+    overlay_object(int ctl_fd, int shared_fd, int resizer_fd, int shared_size, int w, int h,
                    int format, int num_buffers) {
         this->overlay_t::getHandleRef = getHandleRef;
         mHandle.version     = sizeof(native_handle);
-        mHandle.numFds      = 2;
+        mHandle.numFds      = 3;
         mHandle.numInts     = 5; // extra ints we have in our handle
         mHandle.ctl_fd      = ctl_fd;
         mHandle.shared_fd   = shared_fd;
+        mHandle.resizer_fd  = resizer_fd;
         mHandle.width       = w;
         mHandle.height      = h;
         mHandle.format      = format;
@@ -230,6 +243,7 @@ public:
 
     int               ctl_fd()    { return mHandle.ctl_fd; }
     int               shared_fd() { return mHandle.shared_fd; }
+    int               resizer_fd() { return mHandle.resizer_fd; }
     overlay_ctrl_t*   data()      { return &mCtl; }
     overlay_ctrl_t*   staging()   { return &mCtlStage; }
     overlay_shared_t* getShared() { return mShared; }
@@ -376,6 +390,8 @@ static int disable_streaming_locked(overlay_shared_t *shared, int ovly_fd)
         } else {
             shared->streamingReset = 1;
             shared->streamEn = 0;
+            /* indicate that buffers are flushed during stream off */
+            shared->dataReady = 0;
         }
     }
 
@@ -418,10 +434,11 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
     uint32_t num = NUM_OVERLAY_BUFFERS_REQUESTED;
     int fd;
     int shared_fd;
+    int resizer_fd;
 
     if (format == OVERLAY_FORMAT_DEFAULT)
     {
-        format = OVERLAY_FORMAT_YCbYCr_422_I;
+        format = OVERLAY_FORMAT_CbYCrY_422_I;
     }
 
     if (ctx->overlay_video1) {
@@ -438,6 +455,17 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
     fd = v4l2_overlay_open(V4L2_OVERLAY_PLANE_VIDEO1);
     if (fd < 0) {
         LOGE("Failed to open overlay device\n");
+        goto error;
+    }
+
+    resizer_fd = v4l2_resizer_open();
+    if (resizer_fd < 0) {
+        LOGE("Failed to open resizer device ret=%d\n",resizer_fd);
+        goto error;
+    }
+
+    if (v4l2_resizer_config(resizer_fd, w, h)) {
+        LOGE("Failed to configure resizer device\n");
         goto error;
     }
 
@@ -461,7 +489,7 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
         goto error1;
     }
 
-   overlay = new overlay_object(fd, shared_fd, shared->size, w, h, format, num);
+   overlay = new overlay_object(fd, shared_fd, resizer_fd, shared->size, w, h, format, num);
    if (overlay == NULL) {
         LOGE("Failed to create overlay object\n");
         goto error1;
@@ -475,7 +503,6 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
    shared->streamingReset = 0;
    shared->dispW = LCD_WIDTH; // Need to determine this properly
    shared->dispH = LCD_HEIGHT; // Need to determine this properly
-
     LOGI("Opened video1/fd=%d/obj=%08lx/shm=%d/size=%d", fd,
         (unsigned long)overlay, shared_fd, shared->size);
 
@@ -501,6 +528,7 @@ static void overlay_destroyOverlay(struct overlay_control_device_t *dev,
 
     int rc;
     int fd = obj->ctl_fd();
+    int resizer_fd = obj->resizer_fd();
     overlay_shared_t *shared = obj->getShared();
 
     if (shared == NULL) {
@@ -521,6 +549,10 @@ static void overlay_destroyOverlay(struct overlay_control_device_t *dev,
 
     if (close(fd)) {
         LOGE( "Error closing overly fd/%d\n", errno);
+    }
+
+    if (close(resizer_fd)) {
+        LOGE( "Error closing overly resizer fd/%d\n", errno);
     }
 
     if (overlay) {
@@ -750,6 +782,7 @@ int overlay_initialize(struct overlay_data_device_t *dev,
     ctx->format       = handle_format(handle);
     ctx->ctl_fd       = handle_ctl_fd(handle);
     ctx->shared_fd    = handle_shared_fd(handle);
+    ctx->resizer_fd    = handle_resizer_fd(handle);
     ctx->shared_size  = handle_shared_size(handle);
     ctx->shared       = NULL;
     ctx->qd_buf_count = 0;
@@ -785,6 +818,21 @@ int overlay_initialize(struct overlay_data_device_t *dev,
     }
 
     return ( rc );
+}
+
+static int overlay_frameCopy(struct overlay_data_device_t *dev, overlay_buffer_t inbuf,
+                             overlay_buffer_t outbuf)
+{
+    int rc = 0;
+    struct overlay_data_context_t* ctx = (struct overlay_data_context_t*)dev;
+
+    rc = v4l2_resizer_execute(ctx->resizer_fd, (void*) inbuf, (void*)outbuf);
+    if (rc) {
+        LOGE("Error resizer framecopy");
+        return rc;
+    }
+
+    return rc;
 }
 
 static int overlay_resizeInput(struct overlay_data_device_t *dev, uint32_t w,
@@ -977,15 +1025,15 @@ int overlay_queueBuffer(struct overlay_data_device_t *dev,
     }
     pthread_mutex_unlock(&ctx->shared->lock);
 
+    int rc = v4l2_overlay_q_buf( ctx->ctl_fd, (int)buffer );
+    if (rc == 0 && ctx->qd_buf_count < ctx->num_buffers) {
+        ctx->qd_buf_count ++;
+    }
+
     // Catch the case where the data side had no need to set the crop window
     if (!ctx->shared->dataReady) {
         ctx->shared->dataReady = 1;
         enable_streaming(ctx->shared, ctx->ctl_fd);
-    }
-
-    int rc = v4l2_overlay_q_buf( ctx->ctl_fd, (int)buffer );
-    if (rc == 0 && ctx->qd_buf_count < ctx->num_buffers) {
-        ctx->qd_buf_count ++;
     }
 
     return rc;
@@ -1119,6 +1167,7 @@ static int overlay_device_open(const struct hw_module_t* module,
 
         dev->device.initialize = overlay_initialize;
         dev->device.resizeInput = overlay_resizeInput;
+        dev->device.frameCopy = overlay_frameCopy;
         dev->device.setCrop = overlay_setCrop;
         dev->device.getCrop = overlay_getCrop;
         dev->device.setParameter = overlay_data_setParameter;
