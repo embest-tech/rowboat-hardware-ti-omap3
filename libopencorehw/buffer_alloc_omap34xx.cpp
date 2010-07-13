@@ -44,7 +44,7 @@
 
 /* based on test code in pvmi/media_io/pvmiofileoutput/src/pvmi_media_io_fileoutput.cpp */
 
-BufferAllocOmap34xx::BufferAllocOmap34xx(): refCount(0), bufferSize(0), maxBuffers(4), numAllocated(0)
+BufferAllocOmap34xx::BufferAllocOmap34xx(): refCount(0), bufferSize(0), maxBuffers(3), numAllocated(0)
 {
 }
 
