@@ -399,6 +399,29 @@ int v4l2_overlay_init(int fd, uint32_t w, uint32_t h, uint32_t fmt)
     return ret;
 }
 
+int v4l2_overlay_reinit(int fd)
+{
+    struct v4l2_format format;
+    int ret;
+
+    LOG_FUNCTION_NAME
+
+    format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+    ret = v4l2_overlay_ioctl(fd, VIDIOC_G_FMT, &format, "get format");
+    if (ret)
+        return ret;
+    LOGI("v4l2_overlay_reinit:: w=%d h=%d\n", format.fmt.pix.width, format.fmt.pix.height);
+
+    format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+    LOGI("v4l2_overlay_init:: w=%d h=%d\n", format.fmt.pix.width, format.fmt.pix.height);
+    ret = v4l2_overlay_ioctl(fd, VIDIOC_S_FMT, &format, "set output format");
+
+    format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+    ret = v4l2_overlay_ioctl(fd, VIDIOC_G_FMT, &format, "get output format");
+    LOGI("v4l2_overlay_init:: w=%d h=%d\n", format.fmt.pix.width, format.fmt.pix.height);
+    return ret;
+}
+
 int v4l2_overlay_get_input_size_and_format(int fd, uint32_t *w, uint32_t *h, uint32_t *fmt)
 {
     LOG_FUNCTION_NAME

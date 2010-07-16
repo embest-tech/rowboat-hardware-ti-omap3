@@ -38,21 +38,11 @@ extern "C" {
 #include <cutils/atomic.h>
 
 /*****************************************************************************/
-#if 0
-#undef LOGV
-#define LOGV LOGD
-#undef LOGI
-#define LOGI LOGD
-#endif
 
 #define LOG_FUNCTION_NAME LOGV(" %s %s",  __FILE__, __FUNCTION__)
 
 #define NUM_OVERLAY_BUFFERS_REQUESTED  (3)
 #define SHARED_DATA_MARKER             (0x68759746) // OVRLYSHM on phone keypad
-
-/* These values should come from Surface Flinger */
-#define LCD_WIDTH 720//480
-#define LCD_HEIGHT 576 //854
 
 #define CACHEABLE_BUFFERS 0x1
 
@@ -89,10 +79,6 @@ typedef struct
 
   uint32_t streamEn;
   uint32_t streamingReset;
-
-  uint32_t dispW;
-  uint32_t dispH;
-
 } overlay_shared_t;
 
 // Only one instance is created per platform
@@ -474,13 +460,17 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
         goto error1;
     }
 
-    if (v4l2_overlay_set_crop(fd, 0, 0, w, h)) {
-        LOGE("Failed defaulting crop window\n");
+    /* Rotation MUST come prior all overlay operations.
+     * Set rotation to 90 now. Then we'll be able to
+     * change the angle runtime, otherwise DSS crashes.
+     */
+    if (v4l2_overlay_set_rotation(fd, 90, 0)) {
+        LOGE("Failed defaulting rotation\n");
         goto error1;
     }
 
-    if (v4l2_overlay_set_rotation(fd, 0, 0)) {
-        LOGE("Failed defaulting rotation\n");
+    if (v4l2_overlay_set_crop(fd, 0, 0, w, h)) {
+        LOGE("Failed defaulting crop window\n");
         goto error1;
     }
 
@@ -496,13 +486,13 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
    }
    ctx->overlay_video1 = overlay;
 
+   overlay->data()->rotation = 90;
+
    overlay->setShared(shared);
 
    shared->controlReady = 0;
    shared->streamEn = 0;
    shared->streamingReset = 0;
-   shared->dispW = LCD_WIDTH; // Need to determine this properly
-   shared->dispH = LCD_HEIGHT; // Need to determine this properly
     LOGI("Opened video1/fd=%d/obj=%08lx/shm=%d/size=%d", fd,
         (unsigned long)overlay, shared_fd, shared->size);
 
@@ -568,49 +558,17 @@ static int overlay_setPosition(struct overlay_control_device_t *dev,
                                overlay_t* overlay, int x, int y, uint32_t w,
                                uint32_t h)
 {
+    overlay_object *obj = static_cast<overlay_object *>(overlay);
+    overlay_ctrl_t   *stage  = obj->staging();
+
     LOG_FUNCTION_NAME;
 
-    overlay_object *obj = static_cast<overlay_object *>(overlay);
+    stage->posX = x;
+    stage->posY = y;
+    stage->posW = w;
+    stage->posH = h;
 
-    overlay_ctrl_t   *stage  = obj->staging();
-    overlay_shared_t *shared = obj->getShared();
-
-    int rc = 0;
-
-    // FIXME:  This is a hack to deal with seemingly unintentional negative
-    // offset that pop up now and again.  I believe the negative offsets are
-    // due to a surface flinger bug that has not yet been found or fixed.
-    //
-    // This logic here is to return an error if the rectangle is not fully
-    // within the display, unless we have not received a valid position yet,
-    // in which case we will do our best to adjust the rectangle to be within
-    // the display.
-
-    // Require a minimum size
-    if (w < 16 || h < 16) {
-        // Return an error
-        rc = -1;
-    } else if (!shared->controlReady) {
-        if ( x < 0 ) x = 0;
-        if ( y < 0 ) y = 0;
-        if ( w > shared->dispW ) w = shared->dispW;
-        if ( h > shared->dispH ) h = shared->dispH;
-        if ( (x + w) > shared->dispW ) w = shared->dispW - x;
-        if ( (y + h) > shared->dispH ) h = shared->dispH - y;
-    } else if (x < 0 || y < 0 || (x + w) > shared->dispW ||
-               (y + h) > shared->dispH) {
-        // Return an error
-        rc = -1;
-    }
-
-    if (rc == 0) {
-        stage->posX = x;
-        stage->posY = y;
-        stage->posW = w;
-        stage->posH = h;
-    }
-
-    return rc;
+    return 0;
 }
 
 static int overlay_getPosition(struct overlay_control_device_t *dev,
@@ -678,6 +636,7 @@ static int overlay_commit(struct overlay_control_device_t *dev,
     overlay_ctrl_t   *data   = obj->data();
     overlay_ctrl_t   *stage  = obj->staging();
     overlay_shared_t *shared = obj->getShared();
+    overlay_ctrl_t    tmp_stage;
 
     int ret = 0;
     int fd = obj->ctl_fd();
@@ -693,6 +652,15 @@ static int overlay_commit(struct overlay_control_device_t *dev,
         shared->controlReady = 1;
     }
 
+    /* convert stage window into v4l2 window format */
+    if (stage->rotation == 90 || stage->rotation == 270) {
+        memcpy(&tmp_stage, stage, sizeof(tmp_stage));
+        stage->posX = tmp_stage.posY;
+        stage->posY = tmp_stage.posX;
+        stage->posW = tmp_stage.posH;
+        stage->posH = tmp_stage.posW;
+    }
+
     if (data->posX == stage->posX && data->posY == stage->posY &&
         data->posW == stage->posW && data->posH == stage->posH &&
         data->rotation == stage->rotation) {
@@ -703,7 +671,7 @@ static int overlay_commit(struct overlay_control_device_t *dev,
     LOGI("Position/X%d/Y%d/W%d/H%d\n", data->posX, data->posY, data->posW,
          data->posH);
     LOGI("Adjusted Position/X%d/Y%d/W%d/H%d\n", stage->posX, stage->posY,
-         stage->posW, data->posH);
+         stage->posW, stage->posH);
     LOGI("Rotation/%d\n", stage->rotation );
 
     if ((ret = disable_streaming_locked(shared, fd)))
@@ -716,6 +684,12 @@ static int overlay_commit(struct overlay_control_device_t *dev,
             goto end;
         }
         data->rotation = stage->rotation;
+
+        ret = v4l2_overlay_reinit(fd);
+        if (ret) {
+            LOGE("Failed reinitializing overlays %d\n", ret);
+            goto end;
+        }
     }
 
     if (!(stage->posX == data->posX && stage->posY == data->posY &&
@@ -782,7 +756,7 @@ int overlay_initialize(struct overlay_data_device_t *dev,
     ctx->format       = handle_format(handle);
     ctx->ctl_fd       = handle_ctl_fd(handle);
     ctx->shared_fd    = handle_shared_fd(handle);
-    ctx->resizer_fd    = handle_resizer_fd(handle);
+    ctx->resizer_fd   = handle_resizer_fd(handle);
     ctx->shared_size  = handle_shared_size(handle);
     ctx->shared       = NULL;
     ctx->qd_buf_count = 0;
@@ -924,10 +898,10 @@ static int overlay_data_setParameter(struct overlay_data_device_t *dev,
 
 static int overlay_setCrop(struct overlay_data_device_t *dev, uint32_t x,
                            uint32_t y, uint32_t w, uint32_t h) {
-    LOG_FUNCTION_NAME;
-
     int rc = 0;
     struct overlay_data_context_t* ctx = (struct overlay_data_context_t*)dev;
+
+    LOG_FUNCTION_NAME;
 
     if (ctx->shared == NULL) {
         LOGI("Shared Data Not Init'd!\n");
@@ -969,6 +943,8 @@ end:
 static int overlay_getCrop(struct overlay_data_device_t *dev , uint32_t* x,
                            uint32_t* y, uint32_t* w, uint32_t* h) {
     struct overlay_data_context_t* ctx = (struct overlay_data_context_t*)dev;
+
+    LOG_FUNCTION_NAME;
 
     return v4l2_overlay_get_crop(ctx->ctl_fd, x, y, w, h);
 }

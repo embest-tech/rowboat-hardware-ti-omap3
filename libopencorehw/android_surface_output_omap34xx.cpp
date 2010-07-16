@@ -177,7 +177,7 @@ static void debugShowFPS()
         mFps = ((mFrameCount - mLastFrameCount) * float(s2ns(1))) / diff;
         mLastFpsTime = now;
         mLastFrameCount = mFrameCount;
-        LOGV("%d Frames, %f FPS", mFrameCount, mFps);
+        LOGD("%d Frames, %f FPS", mFrameCount, mFps);
     }
     // XXX: mFPS has the value we want
 }
@@ -231,7 +231,7 @@ PVMFStatus AndroidSurfaceOutputOmap34xx::writeFrameBuf(uint8* aData, uint32 aDat
             }
         }
 
-        LOGD("queueBuffer %d\n", bufEnc);
+        LOGV("queueBuffer %d\n", bufEnc);
 
         /* Accelerated frame copy from DSP buffer into v4l buffer */
         if (mIsDSPBuf) {
