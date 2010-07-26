@@ -252,7 +252,7 @@ PVMFStatus AndroidSurfaceOutputOmap34xx::writeFrameBuf(uint8* aData, uint32 aDat
 }
 
 
-#define USE_BUFFER_ALLOC 1
+//#define USE_BUFFER_ALLOC 1
 
 /* based on test code in pvmi/media_io/pvmiofileoutput/src/pvmi_media_io_fileoutput.cpp */
 void AndroidSurfaceOutputOmap34xx::setParametersSync(PvmiMIOSession aSession,
