@@ -444,6 +444,7 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
         goto error;
     }
 
+#ifdef HAS_ISP
     resizer_fd = v4l2_resizer_open();
     if (resizer_fd < 0) {
         LOGE("Failed to open resizer device ret=%d\n",resizer_fd);
@@ -454,6 +455,7 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
         LOGE("Failed to configure resizer device\n");
         goto error;
     }
+#endif
 
     if (v4l2_overlay_init(fd, w, h, format)) {
         LOGE("Failed initializing overlays\n");
@@ -541,9 +543,11 @@ static void overlay_destroyOverlay(struct overlay_control_device_t *dev,
         LOGE( "Error closing overly fd/%d\n", errno);
     }
 
+#ifdef HAS_ISP
     if (close(resizer_fd)) {
         LOGE( "Error closing overly resizer fd/%d\n", errno);
     }
+#endif
 
     if (overlay) {
         if (ctx->overlay_video1 == overlay)
