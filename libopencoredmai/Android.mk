@@ -1,3 +1,7 @@
+# Overlay is completly reworked. This code is no needed more.
+# to-be-removed
+ifneq ($(strip $(libopencoredmai_overlay)),)
+
 LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 
@@ -31,3 +35,5 @@ LOCAL_MODULE := libopencoredmai
 LOCAL_LDLIBS += 
 
 include $(BUILD_SHARED_LIBRARY)
+
+endif
