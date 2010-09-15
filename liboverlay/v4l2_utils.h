@@ -5,6 +5,9 @@
 #define ANDROID_ZOOM_REPO_HARDWARE_TI_OMAP3_LIBOVERLAY_V4L2_UTILS_H_
 
 int v4l2_overlay_open(int id);
+int v4l2_resizer_open(void);
+int v4l2_resizer_config(int resizer_fd, uint32_t w, uint32_t h);
+int v4l2_resizer_execute(int resizer_fd, void *src_buf, void *dst_buf);
 int v4l2_overlay_get_caps(int fd, struct v4l2_capability *caps);
 int v4l2_overlay_req_buf(int fd, uint32_t *num_bufs, int cacheable_buffers);
 int v4l2_overlay_query_buffer(int fd, int index, struct v4l2_buffer *buf);
@@ -15,6 +18,7 @@ int v4l2_overlay_stream_off(int fd);
 int v4l2_overlay_q_buf(int fd, int index);
 int v4l2_overlay_dq_buf(int fd, int *index);
 int v4l2_overlay_init(int fd, uint32_t w, uint32_t h, uint32_t fmt);
+int v4l2_overlay_reinit(int fd);
 int v4l2_overlay_get_input_size(int fd, uint32_t *w, uint32_t *h, uint32_t *fmt);
 int v4l2_overlay_set_position(int fd, int32_t x, int32_t y, int32_t w,
                               int32_t h);

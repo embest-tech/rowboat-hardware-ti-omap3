@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 //#define OVERLAY_DEBUG 1
 #define LOG_TAG "Overlay"
 
@@ -25,6 +24,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include "v4l2_utils.h"
+#include <linux/omap_resizer.h>
 
 #define LOG_FUNCTION_NAME    LOGV("%s: %s",  __FILE__, __FUNCTION__);
 
@@ -89,6 +89,123 @@ int v4l2_overlay_open(int id)
     else if (id == V4L2_OVERLAY_PLANE_VIDEO2)
         return open("/dev/video2", O_RDWR);
     return -EINVAL;
+}
+
+int v4l2_resizer_open(void)
+{
+    LOG_FUNCTION_NAME
+
+    return open("/dev/omap-resizer", O_RDWR);
+}
+
+int v4l2_resizer_config(int resizer_fd, uint32_t w, uint32_t h)
+{
+    int rszRate, ret;
+    struct v4l2_requestbuffers reqbuf;
+    struct rsz_params  params = {
+        0,                              /* in_hsize (set at run time) */
+        0,                              /* in_vsize (set at run time) */
+        0,                              /* in_pitch (set at run time) */
+        RSZ_INTYPE_YCBCR422_16BIT,      /* inptyp */
+        0,                              /* vert_starting_pixel */
+        0,                              /* horz_starting_pixel */
+        0,                              /* cbilin */
+        RSZ_PIX_FMT_UYVY,               /* pix_fmt */
+        0,                              /* out_hsize (set at run time) */
+        0,                              /* out_vsize (set at run time) */
+        0,                              /* out_pitch (set at run time) */
+        0,                              /* hstph */
+        0,                              /* vstph */
+        {                               /* hfilt_coeffs */
+             0, 256,   0,   0,  -6, 246,  16,   0,
+            -7, 219,  44,   0,  -5, 179,  83,  -1,
+            -3, 130, 132,  -3,  -1,  83, 179,  -5,
+             0,  44, 219,  -7,   0,  16, 246,  -6
+        },
+        {                               /* vfilt_coeffs */
+            -1,  19, 108, 112,  19,  -1,   0,   0,
+             0,   6,  88, 126,  37,  -1,   0,   0,
+             0,   0,  61, 134,  61,   0,   0,   0,
+             0,  -1,  37, 126,  88,   6,   0,   0
+        },
+        {                               /* yenh_params */
+            0,                              /* type */
+            0,                              /* gain */
+            0,                              /* slop */
+            0                               /* core */
+        }
+    };
+
+    LOG_FUNCTION_NAME
+
+    /* Set up the copy job */
+    params.in_hsize  = w;
+    params.in_vsize  = h;
+    params.in_pitch  = params.in_hsize << 1;
+    params.out_hsize = params.in_hsize;
+    params.out_vsize = params.in_vsize;
+    params.out_pitch = params.in_pitch;
+
+    ret = ioctl(resizer_fd, RSZ_S_PARAM, &params);
+    if (ret) {
+        LOGE("Framecopy setting parameters failed ret=%d\n",ret);
+        return ret;
+    }
+
+    rszRate = 0x0;
+
+    ret = ioctl(resizer_fd, RSZ_S_EXP, &rszRate);
+    if (ret) {
+        LOGE("Framecopy setting read cycle failed\n");
+        return ret;
+    }
+    reqbuf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    reqbuf.memory = V4L2_MEMORY_USERPTR;
+    reqbuf.count  = 2;
+
+    ret = ioctl(resizer_fd, RSZ_REQBUF, &reqbuf);
+    if (ret != reqbuf.count) {
+        LOGE("Resizer request buffer failed ret=%d\n",ret);
+        return ret;
+    }
+
+    return 0;
+}
+
+int v4l2_resizer_execute(int resizer_fd, void *src_buf, void *dst_buf)
+{
+    int i, ret;
+    struct v4l2_buffer qbuf[2];
+
+    /* Queue the resizer buffers */
+    for (i=0; i < 2; i++) {
+        qbuf[i].type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        qbuf[i].memory = V4L2_MEMORY_USERPTR;
+        qbuf[i].index  = i;
+
+        ret = ioctl (resizer_fd, RSZ_QUERYBUF, &qbuf[i]);
+        if (ret < 0) {
+            LOGE("Failed to query buffer index %d\n", i);
+            return ret;
+        }
+
+        qbuf[i].m.userptr = (i == 0) ? (unsigned long)src_buf :
+                                       (unsigned long)dst_buf;
+
+        ret = ioctl (resizer_fd, RSZ_QUEUEBUF, &qbuf[i]);
+        if (ret < 0) {
+            LOGE("Failed to queue buffer index %d ret=%d\n",i, ret);
+            return ret;
+        }
+    }
+
+    ret = ioctl(resizer_fd, RSZ_RESIZE, NULL);
+    if (ret < 0) {
+        LOGE("Failed to execute resize job ret=%d\n",ret);
+        return ret;
+    }
+
+    return 0;
 }
 
 void dump_pixfmt(struct v4l2_pix_format *pix)
@@ -193,15 +310,27 @@ int configure_pixfmt(struct v4l2_pix_format *pix, int32_t fmt,
     int fd;
 
     switch (fmt) {
+        case OVERLAY_FORMAT_RGBA_8888:
+            return -1;
         case OVERLAY_FORMAT_RGB_565:
             pix->pixelformat = V4L2_PIX_FMT_RGB565;
             break;
+        case OVERLAY_FORMAT_BGRA_8888:
+            return -1;
+        case OVERLAY_FORMAT_YCbCr_422_SP:
+            break;
+        case OVERLAY_FORMAT_YCbCr_420_SP:
+            return -1;
         case OVERLAY_FORMAT_YCbYCr_422_I:
             pix->pixelformat = V4L2_PIX_FMT_YUYV;
             break;
         case OVERLAY_FORMAT_CbYCrY_422_I:
             pix->pixelformat = V4L2_PIX_FMT_UYVY;
             break;
+        case OVERLAY_FORMAT_YCbYCr_420_I:
+            return -1;
+        case OVERLAY_FORMAT_CbYCrY_420_I:
+            return -1;
         default:
             return -1;
     }
@@ -260,6 +389,29 @@ int v4l2_overlay_init(int fd, uint32_t w, uint32_t h, uint32_t fmt)
 
     format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
     configure_pixfmt(&format.fmt.pix, fmt, w, h);
+    LOGI("v4l2_overlay_init:: w=%d h=%d\n", format.fmt.pix.width, format.fmt.pix.height);
+    ret = v4l2_overlay_ioctl(fd, VIDIOC_S_FMT, &format, "set output format");
+
+    format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+    ret = v4l2_overlay_ioctl(fd, VIDIOC_G_FMT, &format, "get output format");
+    LOGI("v4l2_overlay_init:: w=%d h=%d\n", format.fmt.pix.width, format.fmt.pix.height);
+    return ret;
+}
+
+int v4l2_overlay_reinit(int fd)
+{
+    struct v4l2_format format;
+    int ret;
+
+    LOG_FUNCTION_NAME
+
+    format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+    ret = v4l2_overlay_ioctl(fd, VIDIOC_G_FMT, &format, "get format");
+    if (ret)
+        return ret;
+    LOGI("v4l2_overlay_reinit:: w=%d h=%d\n", format.fmt.pix.width, format.fmt.pix.height);
+
+    format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
     LOGI("v4l2_overlay_init:: w=%d h=%d\n", format.fmt.pix.width, format.fmt.pix.height);
     ret = v4l2_overlay_ioctl(fd, VIDIOC_S_FMT, &format, "set output format");
 
@@ -586,7 +738,15 @@ int v4l2_overlay_stream_on(int fd)
     int ret;
     uint32_t type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
 
-    ret = v4l2_overlay_set_local_alpha(fd, 1);
+    ret = v4l2_overlay_set_local_alpha(fd, 0);
+    if (ret)
+        return ret;
+
+    ret = v4l2_overlay_set_global_alpha(fd,1,255);
+    if (ret)
+        return ret;
+
+    ret =  v4l2_overlay_set_colorkey(fd, 1, 0);
     if (ret)
         return ret;
 

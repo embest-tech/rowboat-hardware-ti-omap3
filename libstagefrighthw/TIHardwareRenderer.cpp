@@ -187,29 +187,28 @@ void TIHardwareRenderer::render(
 
     if (mOverlay->queueBuffer((void *)mIndex) == ALL_BUFFERS_FLUSHED) {
         mIsFirstFrame = true;
-        if (mOverlay->queueBuffer((void *)mIndex) != 0) {
-            return;
-        }
-    }
-
-    if (++mIndex == mOverlayAddresses.size()) {
-        mIndex = 0;
+        mOverlay->queueBuffer((void *)mIndex);
     }
 
     overlay_buffer_t overlay_buffer;
     if (!mIsFirstFrame) {
         status_t err = mOverlay->dequeueBuffer(&overlay_buffer);
+	if(err != NO_ERROR){
+	if (err == ALL_BUFFERS_FLUSHED) 
+	mIsFirstFrame = true;
+	return;
 
-        if (err == ALL_BUFFERS_FLUSHED) {
-            mIsFirstFrame = true;
-        } else {
-            return;
-        }
+        } 
     } else {
         mIsFirstFrame = false;
     }
-#endif
+    
+    if (mColorFormat == OMX_COLOR_FormatYUV420Planar) {
+	if (++mIndex == mOverlayAddresses.size()) {
+        		mIndex = 0;
+    		}
+	}
 }
-
+#endif
 }  // namespace android
 
