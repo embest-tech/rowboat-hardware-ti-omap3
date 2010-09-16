@@ -108,7 +108,7 @@ OSCL_EXPORT_REF bool AndroidSurfaceOutputOmap34xx::initCheck()
             // wait in the createOverlay call if the previous overlay is in the
             // process of being destroyed.
             for (int retry = 0; retry < 50; ++retry) {
-                ref = mSurface->createOverlay(frameWidth, frameHeight, videoFormat, 0);
+                ref = mSurface->createOverlay(displayWidth, displayHeight, videoFormat, 0);
                 if (ref != NULL) break;
                 LOGD("Overlay create failed - retrying");
                 usleep(100000);
@@ -123,7 +123,7 @@ OSCL_EXPORT_REF bool AndroidSurfaceOutputOmap34xx::initCheck()
         }
         else
         {
-            mOverlay->resizeInput(frameWidth, frameHeight);
+            mOverlay->resizeInput(displayWidth, displayHeight);
         }
 
         mbufferAlloc.maxBuffers = 3;  // Hardcoded to work with OMX decoder component
