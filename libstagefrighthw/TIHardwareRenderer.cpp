@@ -48,7 +48,7 @@ TIHardwareRenderer::TIHardwareRenderer(
       mColorFormat(colorFormat),
       mInitCheck(NO_INIT),
       mFrameSize(mDecodedWidth * mDecodedHeight * 2),
-      mIsFirstFrame(true),
+      mNumBuffersInQueue(0),
       mIndex(0) {
     CHECK(mISurface.get() != NULL);
     CHECK(mDecodedWidth > 0);
@@ -181,65 +181,46 @@ void TIHardwareRenderer::render(
     if (UNLIKELY(mDebugFps))
         debugShowFPS();
 
-#if 0
-    size_t i = 0;
-    for (; i < mOverlayAddresses.size(); ++i) {
-        if (mOverlayAddresses[i] == data) {
-            break;
-        }
-
-        if (mIsFirstFrame) {
-            LOGI("overlay buffer #%d: %p", i, mOverlayAddresses[i]);
-        }
-    }
-
-    if (i == mOverlayAddresses.size()) {
-        LOGE("No suitable overlay buffer found.");
-        return;
-    }
-
-    mOverlay->queueBuffer((void *)i);
-
+    int ret;
     overlay_buffer_t overlay_buffer;
-    if (!mIsFirstFrame) {
-        CHECK_EQ(mOverlay->dequeueBuffer(&overlay_buffer), OK);
-    } else {
-        mIsFirstFrame = false;
+
+    /* Start dequeue if all buffers are in queue, this affects the performance */
+    if (mNumBuffersInQueue == mOverlayAddresses.size())
+    {
+        ret = mOverlay->dequeueBuffer(&overlay_buffer);
+        if (ret != NO_ERROR) {
+            if (ret == ALL_BUFFERS_FLUSHED)
+                mNumBuffersInQueue = 0;
+            return;
+        }
+        mIndex = (int)overlay_buffer;
     }
-#else
+    else
+    {
+        ++mIndex %= mOverlayAddresses.size();
+        mNumBuffersInQueue++;
+    }
+
     if (mColorFormat == OMX_COLOR_FormatYUV420Planar) {
+        /* Convert from YUV420 to YUV422 for software codec */
         convertYuv420ToYuv422(
                 mDecodedWidth, mDecodedHeight, data, mOverlayAddresses[mIndex]);
     } else {
         CHECK_EQ(mColorFormat, OMX_COLOR_FormatCbYCrY);
-
+        /* TODO: replace memcpy with framecopy */
         memcpy(mOverlayAddresses[mIndex], data, size);
     }
 
-    if (mOverlay->queueBuffer((void *)mIndex) == ALL_BUFFERS_FLUSHED) {
-        mIsFirstFrame = true;
-        mOverlay->queueBuffer((void *)mIndex);
-    }
+    LOGV("queueBuffer %d\n", mIndex);
 
-    overlay_buffer_t overlay_buffer;
-    if (!mIsFirstFrame) {
-        status_t err = mOverlay->dequeueBuffer(&overlay_buffer);
-	if(err != NO_ERROR){
-	if (err == ALL_BUFFERS_FLUSHED) 
-	mIsFirstFrame = true;
-	return;
-
-        } 
-    } else {
-        mIsFirstFrame = false;
+    /* This is to reset the buffer queue when stream_off is called as
+     * all the buffers are flushed when stream_off is called.
+     */
+    ret = mOverlay->queueBuffer((void*)mIndex);
+    if (ret == ALL_BUFFERS_FLUSHED) {
+        mOverlay->queueBuffer((void*)mIndex);
+        mNumBuffersInQueue = 1;
     }
-    
-    if (mColorFormat == OMX_COLOR_FormatYUV420Planar) {
-	if (++mIndex == mOverlayAddresses.size()) {
-        		mIndex = 0;
-    		}
-	}
 }
-#endif
 }  // namespace android
 
