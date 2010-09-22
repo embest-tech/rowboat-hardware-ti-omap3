@@ -25,6 +25,10 @@
 
 #include "v4l2_utils.h"
 
+#include <cutils/properties.h>
+#define UNLIKELY( exp ) (__builtin_expect( (exp) != 0, false ))
+static int mDebugFps = 0;
+
 #define CACHEABLE_BUFFERS 0x1
 
 namespace android {
@@ -72,6 +76,12 @@ TIHardwareRenderer::TIHardwareRenderer(
 
         mOverlayAddresses.push(data->ptr);
     }
+
+    char value[PROPERTY_VALUE_MAX];
+    property_get("debug.video.showfps", value, "0");
+    mDebugFps = atoi(value);
+    if (mDebugFps)
+        LOGD("showfps enabled");
 
     mInitCheck = OK;
 }
@@ -142,6 +152,24 @@ static void convertYuv420ToYuv422(
     }
 }
 
+static void debugShowFPS()
+{
+    static int mFrameCount = 0;
+    static int mLastFrameCount = 0;
+    static nsecs_t mLastFpsTime = 0;
+    static float mFps = 0;
+    mFrameCount++;
+    if (!(mFrameCount & 0x1F)) {
+        nsecs_t now = systemTime();
+        nsecs_t diff = now - mLastFpsTime;
+        mFps = ((mFrameCount - mLastFrameCount) * float(s2ns(1))) / diff;
+        mLastFpsTime = now;
+        mLastFrameCount = mFrameCount;
+        LOGD("%d Frames, %f FPS", mFrameCount, mFps);
+    }
+    // XXX: mFPS has the value we want
+}
+
 void TIHardwareRenderer::render(
         const void *data, size_t size, void *platformPrivate) {
     // CHECK_EQ(size, mFrameSize);
@@ -149,6 +177,9 @@ void TIHardwareRenderer::render(
     if (mOverlay.get() == NULL) {
         return;
     }
+
+    if (UNLIKELY(mDebugFps))
+        debugShowFPS();
 
 #if 0
     size_t i = 0;
