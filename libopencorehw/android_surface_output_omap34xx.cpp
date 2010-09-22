@@ -68,9 +68,10 @@ OSCL_EXPORT_REF AndroidSurfaceOutputOmap34xx::AndroidSurfaceOutputOmap34xx() :
 {
     mUseOverlay = true;
     mOverlay = NULL;
-    mIsFirstFrame = true;
+    mNumBuffersInQueue = 0;
     mbufferAlloc.buffer_address = NULL;
     mConvert = false;
+    mIsDSPBuf = false;
 }
 
 OSCL_EXPORT_REF AndroidSurfaceOutputOmap34xx::~AndroidSurfaceOutputOmap34xx()
@@ -107,7 +108,7 @@ OSCL_EXPORT_REF bool AndroidSurfaceOutputOmap34xx::initCheck()
             // wait in the createOverlay call if the previous overlay is in the
             // process of being destroyed.
             for (int retry = 0; retry < 50; ++retry) {
-                ref = mSurface->createOverlay(displayWidth, displayHeight, videoFormat, 0);
+                ref = mSurface->createOverlay(frameWidth, frameHeight, videoFormat, 0);
                 if (ref != NULL) break;
                 LOGD("Overlay create failed - retrying");
                 usleep(100000);
@@ -122,14 +123,11 @@ OSCL_EXPORT_REF bool AndroidSurfaceOutputOmap34xx::initCheck()
         }
         else
         {
-            mOverlay->resizeInput(displayWidth, displayHeight);
+            mOverlay->resizeInput(frameWidth, frameHeight);
         }
 
-        mbufferAlloc.maxBuffers = 6;  // Hardcoded to work with OMX decoder component
+        mbufferAlloc.maxBuffers = 3;  // Hardcoded to work with OMX decoder component
         mbufferAlloc.bufferSize = iBufferSize;
-        if (mbufferAlloc.buffer_address) {
-            delete [] mbufferAlloc.buffer_address;
-        }
         mbufferAlloc.buffer_address = new uint8*[mbufferAlloc.maxBuffers];
         if (mbufferAlloc.buffer_address == NULL) {
             LOGE("unable to allocate mem for overlay addresses");
@@ -179,7 +177,7 @@ static void debugShowFPS()
         mFps = ((mFrameCount - mLastFrameCount) * float(s2ns(1))) / diff;
         mLastFpsTime = now;
         mLastFrameCount = mFrameCount;
-        LOGV("%d Frames, %f FPS", mFrameCount, mFps);
+        LOGD("%d Frames, %f FPS", mFrameCount, mFps);
     }
     // XXX: mFPS has the value we want
 }
@@ -195,24 +193,49 @@ PVMFStatus AndroidSurfaceOutputOmap34xx::writeFrameBuf(uint8* aData, uint32 aDat
 
     if (mUseOverlay) {
         int ret;
+        overlay_buffer_t overlay_buffer;
+
+        /* Start dequeue if all buffers are in queue, this affects the performance */
+        if (mNumBuffersInQueue == mbufferAlloc.maxBuffers)
+        {
+            ret = mOverlay->dequeueBuffer(&overlay_buffer);
+            if (ret != NO_ERROR) {
+                if (ret == ALL_BUFFERS_FLUSHED)
+                    mNumBuffersInQueue = 0;
+                return false;
+            }
+            bufEnc = (int)overlay_buffer;
+        }
+        else
+        {
+            ++bufEnc %= mbufferAlloc.maxBuffers;
+            mNumBuffersInQueue++;
+        }
 
         // Convert from YUV420 to YUV422 for software codec
         if (mConvert) {
             convertYuv420ToYuv422(iVideoWidth, iVideoHeight, aData, mbufferAlloc.buffer_address[bufEnc]);
-        } else {
+        } else if (!mIsDSPBuf) {
             int i;
             for (i = 0; i < mbufferAlloc.maxBuffers; i++) {
                 if (mbufferAlloc.buffer_address[i] == aData) {
                     break;
                 }
+            }
 
-            }
             if (i == mbufferAlloc.maxBuffers) {
-                LOGE("aData does not match any v4l buffer address\n");
-                return PVMFSuccess;
+                LOGD("aData does not match any v4l buffer address, then it's DSP buffer\n");
+                mIsDSPBuf = true;
+            } else {
+                bufEnc = i;
             }
-            LOGV("queueBuffer %d\n", i);
-            bufEnc = i;
+        }
+
+        LOGV("queueBuffer %d\n", bufEnc);
+
+        /* Accelerated frame copy from DSP buffer into v4l buffer */
+        if (mIsDSPBuf) {
+            mOverlay->frameCopy((void*)aData, (void*)mbufferAlloc.buffer_address[bufEnc]);
         }
 
         /* This is to reset the buffer queue when stream_off is called as
@@ -220,42 +243,16 @@ PVMFStatus AndroidSurfaceOutputOmap34xx::writeFrameBuf(uint8* aData, uint32 aDat
          */
         ret = mOverlay->queueBuffer((void*)bufEnc);
         if (ret == ALL_BUFFERS_FLUSHED) {
-            mIsFirstFrame = true;
             mOverlay->queueBuffer((void*)bufEnc);
-        }
-
-        overlay_buffer_t overlay_buffer;
-
-        /* This is to prevent dequeueBuffer to be called before the first
-         * queueBuffer call is done. If that happens, there will be a delay
-         * as the dequeueBuffer call will be blocked.
-         */
-        if (!mIsFirstFrame)
-        {
-            ret = mOverlay->dequeueBuffer(&overlay_buffer);
-            if (ret != NO_ERROR) {
-                if (ret == ALL_BUFFERS_FLUSHED)
-                    mIsFirstFrame = true;
-                return false;
-            }
-        }
-        else
-        {
-            mIsFirstFrame = false;
-        }
-
-        // advance the overlay index if using color conversion
-        if (mConvert) {
-            if (++bufEnc == mbufferAlloc.maxBuffers) {
-                bufEnc = 0;
-            }
+            mNumBuffersInQueue = 1;
         }
     }
+
     return PVMFSuccess;
 }
 
 
-#define USE_BUFFER_ALLOC 1
+//#define USE_BUFFER_ALLOC 1
 
 /* based on test code in pvmi/media_io/pvmiofileoutput/src/pvmi_media_io_fileoutput.cpp */
 void AndroidSurfaceOutputOmap34xx::setParametersSync(PvmiMIOSession aSession,

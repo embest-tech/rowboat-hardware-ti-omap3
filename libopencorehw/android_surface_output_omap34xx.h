@@ -68,8 +68,9 @@ class AndroidSurfaceOutputOmap34xx : public AndroidSurfaceOutput
 
         int32                   iNumberOfBuffers;
         int32                   iBufferSize;
-        bool                    mIsFirstFrame;
+        int                     mNumBuffersInQueue;
         bool                    mConvert;
+        bool                    mIsDSPBuf;
     public:
         BufferAllocOmap34xx     mbufferAlloc;
 };

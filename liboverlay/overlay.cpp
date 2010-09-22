@@ -445,8 +445,7 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
     }
 
 #ifdef HAS_ISP
-
-resizer_fd = v4l2_resizer_open();
+    resizer_fd = v4l2_resizer_open();
     if (resizer_fd < 0) {
         LOGE("Failed to open resizer device ret=%d\n",resizer_fd);
         goto error;
@@ -456,7 +455,6 @@ resizer_fd = v4l2_resizer_open();
         LOGE("Failed to configure resizer device\n");
         goto error;
     }
-
 #endif
 
     if (v4l2_overlay_init(fd, w, h, format)) {
@@ -546,11 +544,9 @@ static void overlay_destroyOverlay(struct overlay_control_device_t *dev,
     }
 
 #ifdef HAS_ISP
-
-if (close(resizer_fd)) {
+    if (close(resizer_fd)) {
         LOGE( "Error closing overly resizer fd/%d\n", errno);
     }
-
 #endif
 
     if (overlay) {
