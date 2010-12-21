@@ -58,8 +58,26 @@ extern "C" {
 }
 
 #define CACHEABLE_BUFFERS 0x1
+/* FIXME - duplicate in liboverlay/v4l2_utils.h */
+#define NUM_OVERLAY_BUFFERS_REQUESTED  (3)
 
 using namespace android;
+
+enum wrd_state_e {
+    WRD_STATE_UNUSED,
+    WRD_STATE_UNQUEUED,
+    WRD_STATE_INDSSQUEUE
+};
+
+typedef struct WriteResponseData_t {
+     PvmiCapabilityContext aContext;
+     PVMFTimestamp aTimestamp;
+     PVMFCommandId cmdid;
+     void *ptr;
+     enum wrd_state_e state;
+} WriteResponseData;
+
+static WriteResponseData sWriteRespData[NUM_OVERLAY_BUFFERS_REQUESTED];
 
 static void convertYuv420ToYuv422(int width, int height, void* src, void* dst);
 
@@ -68,10 +86,11 @@ OSCL_EXPORT_REF AndroidSurfaceOutputOmap34xx::AndroidSurfaceOutputOmap34xx() :
 {
     mUseOverlay = true;
     mOverlay = NULL;
-    mNumBuffersInQueue = 0;
     mbufferAlloc.buffer_address = NULL;
     mConvert = false;
-    mIsDSPBuf = false;
+    mBuffersQueuedToDSS = 0;
+    /* the v4l2 overlay holds 2 decoder output buffers */
+    mNumberOfFramesToHold = 2;
 }
 
 OSCL_EXPORT_REF AndroidSurfaceOutputOmap34xx::~AndroidSurfaceOutputOmap34xx()
@@ -82,10 +101,11 @@ OSCL_EXPORT_REF AndroidSurfaceOutputOmap34xx::~AndroidSurfaceOutputOmap34xx()
 OSCL_EXPORT_REF bool AndroidSurfaceOutputOmap34xx::initCheck()
 {
     LOGV("Calling Vendor(34xx) Specific initCheck");
-    
+    mInitialized = false;
     // reset flags in case display format changes in the middle of a stream
     resetVideoParameterFlags();
     bufEnc = 0;
+    mBuffersQueuedToDSS = 0;
 
     // copy parameters in case we need to adjust them
     int displayWidth = iVideoDisplayWidth;
@@ -108,6 +128,8 @@ OSCL_EXPORT_REF bool AndroidSurfaceOutputOmap34xx::initCheck()
             // wait in the createOverlay call if the previous overlay is in the
             // process of being destroyed.
             for (int retry = 0; retry < 50; ++retry) {
+                //FIXME: frameWidth vs displayWidth ?
+                // ref = mSurface->createOverlay(frameWidth, frameHeight, videoFormat, 0);
                 ref = mSurface->createOverlay(displayWidth, displayHeight, videoFormat, 0);
                 if (ref != NULL) break;
                 LOGD("Overlay create failed - retrying");
@@ -120,13 +142,20 @@ OSCL_EXPORT_REF bool AndroidSurfaceOutputOmap34xx::initCheck()
             }
             mOverlay = new Overlay(ref);
             mOverlay->setParameter(CACHEABLE_BUFFERS, 0);
+
+            for (int i=0; i<NUM_OVERLAY_BUFFERS_REQUESTED; i++)
+                sWriteRespData[i].state = WRD_STATE_UNUSED;
         }
         else
         {
+            //FIXME: frameWidth vs displayWidth ?
+            // mOverlay->resizeInput(frameWidth, frameHeight);
             mOverlay->resizeInput(displayWidth, displayHeight);
         }
-
-        mbufferAlloc.maxBuffers = 3;  // Hardcoded to work with OMX decoder component
+        LOGI("Actual resolution: %dx%d", frameWidth, frameHeight);
+        LOGI("Video resolution: %dx%d", iVideoWidth, iVideoHeight);
+#if 0
+        mbufferAlloc.maxBuffers = mOverlay->getBufferCount();
         mbufferAlloc.bufferSize = iBufferSize;
         mbufferAlloc.buffer_address = new uint8*[mbufferAlloc.maxBuffers];
         if (mbufferAlloc.buffer_address == NULL) {
@@ -145,16 +174,11 @@ OSCL_EXPORT_REF bool AndroidSurfaceOutputOmap34xx::initCheck()
                 LOGV("buffer = %d allocated addr=%#lx\n", i, (unsigned long) mbufferAlloc.buffer_address[i]);
             }
         }        
+#endif
     }
     mInitialized = true;
     LOGV("sendEvent(MEDIA_SET_VIDEO_SIZE, %d, %d)", iVideoDisplayWidth, iVideoDisplayHeight);
     mPvPlayer->sendEvent(MEDIA_SET_VIDEO_SIZE, iVideoDisplayWidth, iVideoDisplayHeight);
-
-    // is conversion necessary?
-    if (iVideoSubFormat == PVMF_MIME_YUV420_PLANAR) {
-        LOGV("Use YUV420_PLANAR -> YUV422_INTERLEAVED_UYVY converter");
-        mConvert = true;
-    }
 
     char value[PROPERTY_VALUE_MAX];
     property_get("debug.video.showfps", value, "0");
@@ -182,73 +206,281 @@ static void debugShowFPS()
     // XXX: mFPS has the value we want
 }
 
-PVMFStatus AndroidSurfaceOutputOmap34xx::writeFrameBuf(uint8* aData, uint32 aDataLen, const PvmiMediaXferHeader& data_header_info)
+
+PVMFCommandId  AndroidSurfaceOutputOmap34xx::writeAsync(uint8 aFormatType, int32 aFormatIndex, uint8* aData, uint32 aDataLen,
+                                         const PvmiMediaXferHeader& data_header_info, OsclAny* aContext)
+{
+    bool bDequeueFail = false;
+    bool bQueueFail = false;
+
+    // Do a leave if MIO is not configured except when it is an EOS
+    if (!iIsMIOConfigured &&
+        !((PVMI_MEDIAXFER_FMT_TYPE_NOTIFICATION == aFormatType)
+          && (PVMI_MEDIAXFER_FMT_INDEX_END_OF_STREAM == aFormatIndex)))
+    {
+        LOGE("data is pumped in before MIO is configured");
+        OSCL_LEAVE(OsclErrInvalidState);
+        return -1;
+    }
+
+    uint32 aSeqNum = data_header_info.seq_num;
+    PVMFTimestamp aTimestamp = data_header_info.timestamp;
+    uint32 flags = data_header_info.flags;
+    PVMFCommandId cmdid = iCommandCounter++;
+
+    if (aSeqNum < 6) {
+        LOGV("AndroidSurfaceOutputOmap34xx::writeAsync() seqnum %d ts %d context %d",aSeqNum,aTimestamp, (int)aContext);
+        LOGV("AndroidSurfaceOutputOmap34xx::writeAsync() Format Type %d Format Index %d length %d",aFormatType,aFormatIndex,aDataLen);
+    }
+
+    PVMFStatus status=PVMFFailure;
+
+    switch (aFormatType) {
+    case PVMI_MEDIAXFER_FMT_TYPE_COMMAND :
+        LOGD("AndroidSurfaceOutputOmap34xx::writeAsync() called with Command info.");
+        //ignore
+        status= PVMFSuccess;
+        break;
+
+    case PVMI_MEDIAXFER_FMT_TYPE_NOTIFICATION :
+        LOGD("AndroidSurfaceOutputOmap34xx::writeAsync() called with Notification info.");
+        switch (aFormatIndex) {
+        case PVMI_MEDIAXFER_FMT_INDEX_END_OF_STREAM:
+            iEosReceived = true;
+            break;
+        default:
+            break;
+        }
+        //ignore
+        status= PVMFSuccess;
+        break;
+
+    case PVMI_MEDIAXFER_FMT_TYPE_DATA :
+        switch (aFormatIndex) {
+        case PVMI_MEDIAXFER_FMT_INDEX_FMT_SPECIFIC_INFO:
+            //format-specific info contains codec headers.
+            LOGD("AndroidSurfaceOutputOmap34xx::writeAsync() called with format-specific info.");
+
+            if (iState<STATE_INITIALIZED) {
+                LOGE("AndroidSurfaceOutputOmap34xx::writeAsync: Error - Invalid state");
+                status = PVMFErrInvalidState;
+            } else {
+                status = PVMFSuccess;
+            }
+            break;
+
+        case PVMI_MEDIAXFER_FMT_INDEX_DATA:
+            //data contains the media bitstream.
+
+            //Verify the state
+            if (iState != STATE_STARTED) {
+                LOGE("AndroidSurfaceOutputOmap34xx::writeAsync: Error - Invalid state");
+                status = PVMFErrInvalidState;
+            } else {
+                int idx;
+
+                // Call playback to send data to IVA for Color Convert
+                if (mUseOverlay) {
+                    // Convert from YUV420 to YUV422 for software codec
+                    if (mConvert) {
+                        LOGE("YUV420 to YUV422 conversion not supported");
+                        //convertYuv420ToYuv422(iVideoWidth, iVideoHeight, aData, mbufferAlloc.buffer_address[bufEnc]);
+                        status = PVMFFailure;
+                        break;
+                    }
+#if 0
+                    else if (data_header_info.nOffset != 0) {
+                        LOGE("received buffer with non-zero offset");
+                        status = PVMFFailure;
+                        break;
+                    }
+#endif
+                }
+
+                for (idx = 0; idx < NUM_OVERLAY_BUFFERS_REQUESTED; idx++) {
+                    if (sWriteRespData[idx].state == WRD_STATE_UNUSED)
+                        break;
+                }
+
+                if (idx == NUM_OVERLAY_BUFFERS_REQUESTED) {
+                    LOGE("writeAsync(): DSS Queue is full");
+                    status = PVMFFailure;
+                    WriteResponse resp(status, cmdid, aContext, aTimestamp);
+                    iWriteResponseQueue.push_back(resp);
+                    RunIfNotReady();
+                    return cmdid;
+                }
+                LOGV("AndroidSurfaceOutputOmap34xx::writeAsync: Saving context, index=%d", idx);
+
+                sWriteRespData[idx].aContext = aContext;
+                sWriteRespData[idx].aTimestamp  = aTimestamp;
+                sWriteRespData[idx].cmdid = cmdid;
+                sWriteRespData[idx].ptr = aData;
+                sWriteRespData[idx].state = WRD_STATE_UNQUEUED;
+
+                bDequeueFail = false;
+                bQueueFail = false;
+
+                status = writeFrameBuf(aData, aDataLen, data_header_info, idx);
+                switch (status) {
+                    case PVMFSuccess:
+                        LOGV("writeFrameBuf Success");
+                        break;
+                    case PVMFErrArgument:
+                        bQueueFail = true;
+                        LOGW("Queue FAIL from writeFrameBuf");
+                        break;
+                    case PVMFErrInvalidState:
+                        bDequeueFail = true;
+                        LOGI("Dequeue FAIL from writeFrameBuf");
+                        break;
+                    case PVMFFailure:
+                        bDequeueFail = true;
+                        bQueueFail = true;
+                        LOGW("Queue & Dequeue FAIL");
+                        break;
+                    default: //Compiler requirement
+                        LOGE("No such case!!!!!!!!!");
+                    break;
+                }
+                LOGV("AndroidSurfaceOutputOmap34xx::writeAsync: Playback Progress - frame %lu",iFrameNumber++);
+            }
+            break;
+
+        default:
+            LOGE("AndroidSurfaceOutputOmap34xx::writeAsync: Error - unrecognized format index");
+            status = PVMFFailure;
+            break;
+        }
+        break;
+
+    default:
+        LOGE("AndroidSurfaceOutputOmap34xx::writeAsync: Error - unrecognized format type");
+        status = PVMFFailure;
+        break;
+    }
+
+    //Schedule asynchronous response
+    if (iEosReceived) {
+        for (int i = 0; i < NUM_OVERLAY_BUFFERS_REQUESTED; i++) {
+            if (sWriteRespData[i].state == WRD_STATE_INDSSQUEUE) {
+                mBuffersQueuedToDSS--;
+                sWriteRespData[i].state = WRD_STATE_UNUSED;
+
+                WriteResponse resp(status,
+                                sWriteRespData[i].cmdid,
+                                sWriteRespData[i].aContext,
+                                sWriteRespData[i].aTimestamp);
+                iWriteResponseQueue.push_back(resp);
+                RunIfNotReady();
+                //Don't return cmdid here
+            }
+        }
+    }
+    else if (bQueueFail) {
+        //Send default response
+    }
+    else if (bDequeueFail) {
+        status = PVMFFailure; //Set proper error for the caller.
+    }
+    else if (bDequeueFail == false) {
+        status = PVMFSuccess; //Clear posible error while queueing
+        WriteResponse resp(status,
+                           sWriteRespData[iDequeueIndex].cmdid,
+                           sWriteRespData[iDequeueIndex].aContext,
+                           sWriteRespData[iDequeueIndex].aTimestamp);
+        iWriteResponseQueue.push_back(resp);
+        RunIfNotReady();
+        return cmdid;
+    }
+
+    WriteResponse resp(status, cmdid, aContext, aTimestamp);
+    iWriteResponseQueue.push_back(resp);
+    RunIfNotReady();
+
+    return cmdid;
+}
+
+
+PVMFStatus AndroidSurfaceOutputOmap34xx::writeFrameBuf(uint8* aData, uint32 aDataLen, const PvmiMediaXferHeader& data_header_info, int aIndex)
 {
     LOGV(" calling Vendor Specific(34xx) writeFrameBuf call");
+    PVMFStatus eStatus = PVMFSuccess;
+    int idx = 0;
+    int nError = 0;
+    int nActualBuffersInDSS = 0;
+
     if (mSurface == 0) return PVMFFailure;
 
     if (UNLIKELY(mDebugFps)) {
         debugShowFPS();
     }
 
-    if (mUseOverlay) {
-        int ret;
-        overlay_buffer_t overlay_buffer;
+    if (mUseOverlay == 0) return PVMFSuccess;
+    
+    nActualBuffersInDSS = mOverlay->queueBuffer(sWriteRespData[aIndex].ptr);
+    if (nActualBuffersInDSS < 0) {
+        LOGE("overlay queue buffer returns %d ", nActualBuffersInDSS);
+        eStatus = PVMFErrArgument; // Queue failed
+    }
+    else { // Queue succeeded
+        mBuffersQueuedToDSS++;
+        sWriteRespData[aIndex].state = WRD_STATE_INDSSQUEUE;
 
-        /* Start dequeue if all buffers are in queue, this affects the performance */
-        if (mNumBuffersInQueue == mbufferAlloc.maxBuffers)
-        {
-            ret = mOverlay->dequeueBuffer(&overlay_buffer);
-            if (ret != NO_ERROR) {
-                if (ret == ALL_BUFFERS_FLUSHED)
-                    mNumBuffersInQueue = 0;
-                return false;
-            }
-            bufEnc = (int)overlay_buffer;
-        }
-        else
-        {
-            ++bufEnc %= mbufferAlloc.maxBuffers;
-            mNumBuffersInQueue++;
-        }
-
-        // Convert from YUV420 to YUV422 for software codec
-        if (mConvert) {
-            convertYuv420ToYuv422(iVideoWidth, iVideoHeight, aData, mbufferAlloc.buffer_address[bufEnc]);
-        } else if (!mIsDSPBuf) {
-            int i;
-            for (i = 0; i < mbufferAlloc.maxBuffers; i++) {
-                if (mbufferAlloc.buffer_address[i] == aData) {
-                    break;
+        // This code will make sure that whenever a Stream OFF occurs in overlay...
+        // a response is sent for each of the buffer.. so that buffers are not lost 
+        if (mBuffersQueuedToDSS != nActualBuffersInDSS) {
+            for (idx = 0; idx < NUM_OVERLAY_BUFFERS_REQUESTED; idx++) {
+                if (idx == aIndex) {
+                    continue;
+                }
+                if (sWriteRespData[idx].state == WRD_STATE_INDSSQUEUE) {
+                    LOGD("Sending dequeue response for buffer %d", idx);
+                    mBuffersQueuedToDSS--;
+                    sWriteRespData[idx].state = WRD_STATE_UNUSED;
+                    WriteResponse resp(PVMFFailure,
+                                    sWriteRespData[idx].cmdid,
+                                    sWriteRespData[idx].aContext,
+                                    sWriteRespData[idx].aTimestamp);
+                    iWriteResponseQueue.push_back(resp);
+                    RunIfNotReady();
+                }
+                else {
+                    LOGD("Skip buffer %d, not in DSS", idx);
                 }
             }
-
-            if (i == mbufferAlloc.maxBuffers) {
-                LOGD("aData does not match any v4l buffer address, then it's DSP buffer\n");
-                mIsDSPBuf = true;
-            } else {
-                bufEnc = i;
-            }
-        }
-
-        LOGV("queueBuffer %d\n", bufEnc);
-
-        /* Accelerated frame copy from DSP buffer into v4l buffer */
-        if (mIsDSPBuf) {
-            mOverlay->frameCopy((void*)aData, (void*)mbufferAlloc.buffer_address[bufEnc]);
-        }
-
-        /* This is to reset the buffer queue when stream_off is called as
-         * all the buffers are flushed when stream_off is called.
-         */
-        ret = mOverlay->queueBuffer((void*)bufEnc);
-        if (ret == ALL_BUFFERS_FLUSHED) {
-            mOverlay->queueBuffer((void*)bufEnc);
-            mNumBuffersInQueue = 1;
         }
     }
 
-    return PVMFSuccess;
+    overlay_buffer_t overlay_buffer;
+    nError = mOverlay->dequeueBuffer(&overlay_buffer);
+    if (nError == NO_ERROR) {
+        int idx;
+
+        for (idx = 0; idx < NUM_OVERLAY_BUFFERS_REQUESTED; idx++) {
+            if (sWriteRespData[idx].ptr == (uint8 *)overlay_buffer)
+                break;
+        }
+        if (idx == NUM_OVERLAY_BUFFERS_REQUESTED) {
+            LOGE("Overlay dequeued buffer is not in the record");
+            goto exit;
+        }
+
+        iDequeueIndex = idx;
+        mBuffersQueuedToDSS--;
+        sWriteRespData[iDequeueIndex].state = WRD_STATE_UNUSED;
+
+        if (eStatus == PVMFSuccess)
+            return PVMFSuccess; // both Queue and Dequeue succeeded
+        else
+            return PVMFErrArgument; // Only Queue failed
+    }
+
+exit:
+    if (eStatus == PVMFSuccess)
+        return PVMFErrInvalidState; // Only Dequeue failed
+    else
+        return PVMFFailure; // both Queue and Dequeue failed
 }
 
 
@@ -377,7 +609,7 @@ void AndroidSurfaceOutputOmap34xx::postLastFrame()
 
 void AndroidSurfaceOutputOmap34xx::closeFrameBuf()
 {
-    LOGV("Vendor(34xx) Speicif CloseFrameBuf");
+    LOGV("Vendor(34xx) Specific CloseFrameBuf");
     if (UNLIKELY(mDebugFps)) {
         debugShowFPS();
     }

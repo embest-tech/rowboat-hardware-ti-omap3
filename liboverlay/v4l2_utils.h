@@ -4,6 +4,9 @@
 #ifndef ANDROID_ZOOM_REPO_HARDWARE_TI_OMAP3_LIBOVERLAY_V4L2_UTILS_H_
 #define ANDROID_ZOOM_REPO_HARDWARE_TI_OMAP3_LIBOVERLAY_V4L2_UTILS_H_
 
+#define NUM_OVERLAY_BUFFERS_REQUESTED  (3)
+#define NUM_QUEUED_BUFFERS_OPTIMAL     (3)  /* number of queued buffers before dequque */
+
 int v4l2_overlay_open(int id);
 int v4l2_resizer_open(void);
 int v4l2_resizer_config(int resizer_fd, uint32_t w, uint32_t h);
@@ -15,8 +18,15 @@ int v4l2_overlay_map_buf(int fd, int index, void **start, size_t *len);
 int v4l2_overlay_unmap_buf(void *start, size_t len);
 int v4l2_overlay_stream_on(int fd);
 int v4l2_overlay_stream_off(int fd);
+#ifdef OVERLAY_USERPTR_BUFFER
+/* use V4L2_MEMORY_USERPTR type of buffers passed down from decoder
+ * to avoid buffer copy overhead */
+int v4l2_overlay_q_buf(int fd, void *ptr, size_t len);
+int v4l2_overlay_dq_buf(int fd, void **ptr);
+#else
 int v4l2_overlay_q_buf(int fd, int index);
 int v4l2_overlay_dq_buf(int fd, int *index);
+#endif
 int v4l2_overlay_init(int fd, uint32_t w, uint32_t h, uint32_t fmt);
 int v4l2_overlay_reinit(int fd);
 int v4l2_overlay_get_input_size(int fd, uint32_t *w, uint32_t *h, uint32_t *fmt);

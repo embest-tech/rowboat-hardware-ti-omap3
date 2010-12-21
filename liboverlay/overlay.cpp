@@ -41,7 +41,6 @@ extern "C" {
 
 #define LOG_FUNCTION_NAME LOGV(" %s %s",  __FILE__, __FUNCTION__)
 
-#define NUM_OVERLAY_BUFFERS_REQUESTED  (3)
 #define SHARED_DATA_MARKER             (0x68759746) // OVRLYSHM on phone keypad
 
 #define CACHEABLE_BUFFERS 0x1
@@ -101,12 +100,16 @@ struct overlay_data_context_t {
     int height;
     int format;
     int num_buffers;
+#ifdef OVERLAY_USERPTR_BUFFER
+    size_t buffers_len;
+#else
     size_t *buffers_len;
     void **buffers;
+    mapping_data_t    *mapping_data;
+#endif
 
     overlay_data_t    data;
     overlay_shared_t  *shared;
-    mapping_data_t    *mapping_data;
     // Need to count Qd buffers to be sure we don't block DQ'ing when exiting
     int qd_buf_count;
     int cacheable_buffers;
@@ -777,6 +780,17 @@ int overlay_initialize(struct overlay_data_device_t *dev,
 
     ctx->shared->dataReady = 0;
 
+#ifdef OVERLAY_USERPTR_BUFFER
+    /* FIXME following is not ideal to get overlay buffer size,
+     * which is needed to queue a bufer */
+    if (ctx->format == OVERLAY_FORMAT_CbYCrY_422_I) {
+        ctx->buffers_len = ctx->width * ctx->height * 2;
+        rc = 0; /* NO_ERROR */
+    } else {
+        LOGE("overlay_initialize() - unsupported format");
+        return -1;
+    }
+#else
     ctx->mapping_data = new mapping_data_t;
     ctx->buffers     = new void* [ctx->num_buffers];
     ctx->buffers_len = new size_t[ctx->num_buffers];
@@ -794,6 +808,7 @@ int overlay_initialize(struct overlay_data_device_t *dev,
             }
         }
     }
+#endif
 
     return ( rc );
 }
@@ -802,6 +817,8 @@ static int overlay_frameCopy(struct overlay_data_device_t *dev, overlay_buffer_t
                              overlay_buffer_t outbuf)
 {
     int rc = 0;
+
+#ifndef OVERLAY_USERPTR_BUFFER
     struct overlay_data_context_t* ctx = (struct overlay_data_context_t*)dev;
 
     rc = v4l2_resizer_execute(ctx->resizer_fd, (void*) inbuf, (void*)outbuf);
@@ -809,6 +826,7 @@ static int overlay_frameCopy(struct overlay_data_device_t *dev, overlay_buffer_t
         LOGE("Error resizer framecopy");
         return rc;
     }
+#endif
 
     return rc;
 }
@@ -841,9 +859,11 @@ static int overlay_resizeInput(struct overlay_data_device_t *dev, uint32_t w,
     if ((rc = disable_streaming_locked(ctx->shared, ctx->ctl_fd)))
         goto end;
 
+#ifndef OVERLAY_USERPTR_BUFFER
     for (int i = 0; i < ctx->num_buffers; i++) {
         v4l2_overlay_unmap_buf(ctx->buffers[i], ctx->buffers_len[i]);      
     }
+#endif
 
     rc = v4l2_overlay_init(ctx->ctl_fd, w, h, ctx->format);
     if (rc) {
@@ -862,9 +882,11 @@ static int overlay_resizeInput(struct overlay_data_device_t *dev, uint32_t w,
         goto end;
     }
 
+#ifndef OVERLAY_USERPTR_BUFFER
     for (int i = 0; i < ctx->num_buffers; i++)
         v4l2_overlay_map_buf(ctx->ctl_fd, i, &ctx->buffers[i],
                              &ctx->buffers_len[i]);
+#endif
 
     rc = enable_streaming_locked(ctx->shared, ctx->ctl_fd);
 
@@ -962,7 +984,11 @@ int overlay_dequeueBuffer(struct overlay_data_device_t *dev,
     struct overlay_data_context_t* ctx = (struct overlay_data_context_t*)dev;
 
     int rc;
+#ifdef OVERLAY_USERPTR_BUFFER
+    void *i = NULL;
+#else
     int i = -1;
+#endif
 
     pthread_mutex_lock(&ctx->shared->lock);
     if ( ctx->shared->streamingReset )
@@ -975,15 +1001,26 @@ int overlay_dequeueBuffer(struct overlay_data_device_t *dev,
 
     // If we are not streaming dequeue will fail, skip to prevent error printouts
     if (ctx->shared->streamEn) {
+#ifdef OVERLAY_USERPTR_BUFFER
+         if ( ctx->qd_buf_count < NUM_QUEUED_BUFFERS_OPTIMAL ) {
+             LOGE("Queue more buffers before attempting to dequeue");
+             return -1;
+        }
+#endif
         if ((rc = v4l2_overlay_dq_buf( ctx->ctl_fd, &i )) != 0) {
             LOGE("Failed to DQ/%d\n", rc);
         }
+#ifdef OVERLAY_USERPTR_BUFFER
+        *buffer = i;
+        ctx->qd_buf_count --;
+#else
         else if (i < 0 || i > ctx->num_buffers) {
             rc = -EINVAL;
         } else {
             *((int *)buffer) = i;
             ctx->qd_buf_count --;
         }
+#endif
     } else {
         rc = -1;
     }
@@ -1005,15 +1042,27 @@ int overlay_queueBuffer(struct overlay_data_device_t *dev,
     }
     pthread_mutex_unlock(&ctx->shared->lock);
 
+#ifdef OVERLAY_USERPTR_BUFFER
+    int rc = v4l2_overlay_q_buf( ctx->ctl_fd, buffer, ctx->buffers_len);
+#else
     int rc = v4l2_overlay_q_buf( ctx->ctl_fd, (int)buffer );
-    if (rc == 0 && ctx->qd_buf_count < ctx->num_buffers) {
-        ctx->qd_buf_count ++;
+#endif
+    if (rc < 0) {
+        LOGE("queueBuffer failed [%d]", rc);
     }
+    else {
+        if (ctx->qd_buf_count < ctx->num_buffers) {
+            ctx->qd_buf_count ++;
+        }
+#ifdef OVERLAY_USERPTR_BUFFER
+        rc = ctx->qd_buf_count;
+#endif
 
-    // Catch the case where the data side had no need to set the crop window
-    if (!ctx->shared->dataReady) {
-        ctx->shared->dataReady = 1;
-        enable_streaming(ctx->shared, ctx->ctl_fd);
+        // Catch the case where the data side had no need to set the crop window
+        if (!ctx->shared->dataReady) {
+            ctx->shared->dataReady = 1;
+            enable_streaming(ctx->shared, ctx->ctl_fd);
+        }
     }
 
     return rc;
@@ -1028,6 +1077,9 @@ void *overlay_getBufferAddress(struct overlay_data_device_t *dev,
      * presumably, there is some other HAL module that can fill the buffer,
      * using a DSP for instance
      */
+#ifdef OVERLAY_USERPTR_BUFFER
+    return NULL;
+#else
     int ret;
     struct v4l2_buffer buf;
     struct overlay_data_context_t* ctx = (struct overlay_data_context_t*)dev;
@@ -1052,6 +1104,7 @@ void *overlay_getBufferAddress(struct overlay_data_device_t *dev,
     }
 
     return (void *)ctx->mapping_data;
+#endif
 }
 
 int overlay_getBufferCount(struct overlay_data_device_t *dev)
@@ -1071,6 +1124,7 @@ static int overlay_data_close(struct hw_device_t *dev) {
     int rc;
 
     if (ctx) {
+#ifndef OVERLAY_USERPTR_BUFFER
         overlay_data_device_t *overlay_dev = &ctx->device;
         int buf;
         int i;
@@ -1090,6 +1144,7 @@ static int overlay_data_close(struct hw_device_t *dev) {
         delete(ctx->buffers_len);
 
         pthread_mutex_unlock(&ctx->shared->lock);
+#endif
 
         ctx->shared->dataReady = 0;
         close_shared_data( ctx );

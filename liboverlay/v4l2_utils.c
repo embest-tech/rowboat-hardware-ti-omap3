@@ -211,42 +211,19 @@ int v4l2_resizer_execute(int resizer_fd, void *src_buf, void *dst_buf)
 
 void dump_pixfmt(struct v4l2_pix_format *pix)
 {
-    LOGI("w: %d\n", pix->width);
-    LOGI("h: %d\n", pix->height);
-    LOGI("color: %x\n", pix->colorspace);
+    char *fmt;
+
     switch (pix->pixelformat) {
-        case V4L2_PIX_FMT_YUYV:
-            LOGI ("YUYV\n");
-            break;
-        case V4L2_PIX_FMT_UYVY:
-            LOGI ("UYVY\n");
-            break;
-        case V4L2_PIX_FMT_RGB565:
-            LOGI ("RGB565\n");
-            break;
-        case V4L2_PIX_FMT_RGB565X:
-            LOGI ("RGB565X\n");
-            break;
-        default:
-            LOGI("not supported\n");
+        case V4L2_PIX_FMT_YUYV: fmt = "YUYV"; break;
+        case V4L2_PIX_FMT_UYVY: fmt = "UYVY"; break;
+        case V4L2_PIX_FMT_RGB565: fmt = "RGB565"; break;
+        case V4L2_PIX_FMT_RGB565X: fmt = "RGB565X"; break;
+        default: fmt = "unsupported"; break;
     }
+    LOGI("output pixfmt: w %d, h %d, colorsapce %x, pixfmt %s",
+            pix->width, pix->height, pix->colorspace, fmt);
 }
 
-void dump_crop(struct v4l2_crop *crop)
-{
-    LOGI("crop l: %d ", crop->c.left);
-    LOGI("crop t: %d ", crop->c.top);
-    LOGI("crop w: %d ", crop->c.width);
-    LOGI("crop h: %d\n", crop->c.height);
-}
-
-void dump_window(struct v4l2_window *win)
-{
-    LOGI("window l: %d ", win->w.left);
-    LOGI("window t: %d ", win->w.top);
-    LOGI("window w: %d ", win->w.width);
-    LOGI("window h: %d\n", win->w.height);
-}
 void v4l2_overlay_dump_state(int fd)
 {
     struct v4l2_format format;
@@ -258,30 +235,22 @@ void v4l2_overlay_dump_state(int fd)
     ret = ioctl(fd, VIDIOC_G_FMT, &format);
     if (ret < 0)
         return;
-    LOGI("output pixfmt:\n");
     dump_pixfmt(&format.fmt.pix);
 
     format.type = V4L2_BUF_TYPE_VIDEO_OVERLAY;
     ret = ioctl(fd, VIDIOC_G_FMT, &format);
     if (ret < 0)
         return;
-    LOGI("v4l2_overlay window:\n");
-    dump_window(&format.fmt.win);
+    LOGI("v4l2_overlay window: l %d, t %d, w %d, h %d",
+         format.fmt.win.w.left, format.fmt.win.w.top,
+         format.fmt.win.w.width, format.fmt.win.w.height);
 
     crop.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
     ret = ioctl(fd, VIDIOC_G_CROP, &crop);
     if (ret < 0)
         return;
-    LOGI("output crop:\n");
-    dump_crop(&crop);
-/*
-    crop.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    ret = ioctl(fd, VIDIOC_G_CROP, &crop);
-    if (ret < 0)
-        return;
-    LOGI("ovelay crop:\n");
-    dump_crop(&crop);
-*/
+    LOGI("output crop: l %d, t %d, w %d, h %d",
+         crop.c.left, crop.c.top, crop.c.width, crop.c.height);
 }
 
 static void error(int fd, const char *msg)
@@ -642,7 +611,12 @@ int v4l2_overlay_req_buf(int fd, uint32_t *num_bufs, int cacheable_buffers)
     struct v4l2_requestbuffers reqbuf;
     int ret, i;
     reqbuf.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+
+#ifdef OVERLAY_USERPTR_BUFFER
+    reqbuf.memory = V4L2_MEMORY_USERPTR;
+#else
     reqbuf.memory = V4L2_MEMORY_MMAP;
+#endif
     reqbuf.count = *num_bufs;
     //reqbuf.reserved[0] = cacheable_buffers;
     ret = ioctl(fd, VIDIOC_REQBUFS, &reqbuf);
@@ -650,21 +624,23 @@ int v4l2_overlay_req_buf(int fd, uint32_t *num_bufs, int cacheable_buffers)
         error(fd, "reqbuf ioctl");
         return ret;
     }
-    LOGI("%d buffers allocated %d requested\n", reqbuf.count, 4);
-    if (reqbuf.count > *num_bufs) {
-        error(fd, "Not enough buffer structs passed to get_buffers");
+    LOGI("%d buffers allocated, %d requested\n", reqbuf.count, *num_bufs);
+    if (reqbuf.count != *num_bufs) {
+        error(fd, "VIDIOC_REQBUFS failed");
         return -ENOMEM;
     }
-    *num_bufs = reqbuf.count;
     LOGI("buffer cookie is %d\n", reqbuf.type);
     return 0;
 }
 
+#ifndef OVERLAY_USERPTR_BUFFER
 static int is_mmaped(struct v4l2_buffer *buf)
 {
     return buf->flags == V4L2_BUF_FLAG_MAPPED;
 }
+#endif
 
+#if 0
 static int is_queued(struct v4l2_buffer *buf)
 {
     /* is either on the input or output queue in the kernel */
@@ -678,11 +654,16 @@ static int is_dequeued(struct v4l2_buffer *buf)
     return (!(buf->flags & V4L2_BUF_FLAG_QUEUED) &&
             !(buf->flags & V4L2_BUF_FLAG_DONE));
 }
+#endif
 
 int v4l2_overlay_query_buffer(int fd, int index, struct v4l2_buffer *buf)
 {
     LOG_FUNCTION_NAME
 
+#ifdef OVERLAY_USERPTR_BUFFER
+    LOGE("v4l2_overlay_query_buffer() is called in V4L2_MEMORY_USERPTR mode");
+    return -1;
+#else
     memset(buf, 0, sizeof(struct v4l2_buffer));
 
     buf->type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
@@ -691,8 +672,10 @@ int v4l2_overlay_query_buffer(int fd, int index, struct v4l2_buffer *buf)
     LOGI("query buffer, mem=%u type=%u index=%u\n", buf->memory, buf->type,
          buf->index);
     return v4l2_overlay_ioctl(fd, VIDIOC_QUERYBUF, buf, "querybuf ioctl");
+#endif
 }
 
+#ifndef OVERLAY_USERPTR_BUFFER
 int v4l2_overlay_map_buf(int fd, int index, void **start, size_t *len)
 {
     LOG_FUNCTION_NAME
@@ -725,7 +708,7 @@ int v4l2_overlay_unmap_buf(void *start, size_t len)
 
   return munmap(start, len);
 }
-
+#endif
 
 int v4l2_overlay_get_caps(int fd, struct v4l2_capability *caps)
 {
@@ -772,23 +755,35 @@ int v4l2_overlay_stream_off(int fd)
     return ret;
 }
 
+#ifdef OVERLAY_USERPTR_BUFFER
+int v4l2_overlay_q_buf(int fd, void *ptr, size_t len)
+#else
 int v4l2_overlay_q_buf(int fd, int index)
+#endif
 {
+    /* FIXME not idea to track qbuf index */
+    static int index = 0;
     struct v4l2_buffer buf;
     int ret;
 
-    /*
-    ret = v4l2_overlay_query_buffer(fd, buffer_cookie, index, &buf);
-    if (ret)
-        return ret;
-    if (is_queued(buf)) {
-        LOGE("Trying to queue buffer to kernel that is already queued!\n");
-        return -EINVAL
-    }
-    */
+    memset(&buf, 0, sizeof(buf));
+
     buf.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+#ifdef OVERLAY_USERPTR_BUFFER
+    if (!ptr) {
+        LOGE("v4l2_overlay_q_buf() ptr == NULL");
+        return -1;
+    }
+    buf.m.userptr = (unsigned long)ptr;
+    buf.length = len;
+    buf.index = index++;
+    buf.memory = V4L2_MEMORY_USERPTR;
+/*    LOGD("v4l2_overlay_q_buf() ptr %p", ptr);*/
+    index = index % NUM_OVERLAY_BUFFERS_REQUESTED;
+#else
     buf.index = index;
     buf.memory = V4L2_MEMORY_MMAP;
+#endif
     buf.field = V4L2_FIELD_NONE;
     buf.timestamp.tv_sec = 0;
     buf.timestamp.tv_usec = 0;
@@ -797,27 +792,31 @@ int v4l2_overlay_q_buf(int fd, int index)
     return v4l2_overlay_ioctl(fd, VIDIOC_QBUF, &buf, "qbuf");
 }
 
+#ifdef OVERLAY_USERPTR_BUFFER
+int v4l2_overlay_dq_buf(int fd, void **ptr)
+#else
 int v4l2_overlay_dq_buf(int fd, int *index)
+#endif
 {
     struct v4l2_buffer buf;
     int ret;
 
-    /*
-    ret = v4l2_overlay_query_buffer(fd, buffer_cookie, index, &buf);
-    if (ret)
-        return ret;
+    memset(&buf, 0, sizeof(buf));
 
-    if (is_dequeued(buf)) {
-        LOGE("Trying to dequeue buffer that is not in kernel!\n");
-        return -EINVAL
-    }
-    */
     buf.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+#ifdef OVERLAY_USERPTR_BUFFER
+    buf.memory = V4L2_MEMORY_USERPTR;
+#else
     buf.memory = V4L2_MEMORY_MMAP;
+#endif
 
     ret = v4l2_overlay_ioctl(fd, VIDIOC_DQBUF, &buf, "dqbuf");
     if (ret)
       return ret;
+#ifdef OVERLAY_USERPTR_BUFFER
+    *ptr = (void *)buf.m.userptr;
+#else
     *index = buf.index;
+#endif
     return 0;
 }

@@ -17,9 +17,10 @@ LOCAL_PATH:= $(call my-dir)
 # hw/<COPYPIX_HARDWARE_MODULE_ID>.<ro.product.board>.so
 
 include $(CLEAR_VARS)
-ifneq ($(strip $(TARGET_PRODUCT)),am3517evm)
-LOCAL_CFLAGS := -DHAS_ISP=1
-endif
+#ifneq ($(strip $(TARGET_PRODUCT)),am3517evm)
+#LOCAL_CFLAGS := -DHAS_ISP=1
+#endif
+LOCAL_CFLAGS := -DOVERLAY_USERPTR_BUFFER
 LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 LOCAL_SHARED_LIBRARIES := liblog libcutils

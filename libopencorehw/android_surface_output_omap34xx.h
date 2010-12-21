@@ -55,8 +55,9 @@ class AndroidSurfaceOutputOmap34xx : public AndroidSurfaceOutput
         virtual void setParametersSync(PvmiMIOSession aSession, PvmiKvp* aParameters, int num_elements, PvmiKvp * & aRet_kvp);
         virtual PVMFStatus getParametersSync(PvmiMIOSession aSession, PvmiKeyType aIdentifier,
                 PvmiKvp*& aParameters, int& num_parameter_elements, PvmiCapabilityContext aContext);
-        virtual PVMFStatus writeFrameBuf(uint8* aData, uint32 aDataLen, const PvmiMediaXferHeader& data_header_info);
-
+        virtual PVMFStatus writeFrameBuf(uint8* aData, uint32 aDataLen, const PvmiMediaXferHeader& data_header_info, int aIndex);
+        virtual PVMFCommandId writeAsync(uint8 aFormatType, int32 aFormatIndex, uint8* aData, uint32 aDataLen,
+                const PvmiMediaXferHeader& data_header_info, OsclAny* aContext);
         virtual void closeFrameBuf();
         virtual void postLastFrame();
 
@@ -68,9 +69,9 @@ class AndroidSurfaceOutputOmap34xx : public AndroidSurfaceOutput
 
         int32                   iNumberOfBuffers;
         int32                   iBufferSize;
-        int                     mNumBuffersInQueue;
+        int                     mBuffersQueuedToDSS;
         bool                    mConvert;
-        bool                    mIsDSPBuf;
+        int                     iDequeueIndex;
     public:
         BufferAllocOmap34xx     mbufferAlloc;
 };
