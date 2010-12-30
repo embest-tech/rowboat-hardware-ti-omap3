@@ -59,7 +59,7 @@ extern "C" {
 
 #define CACHEABLE_BUFFERS 0x1
 /* FIXME - duplicate in liboverlay/v4l2_utils.h */
-#define NUM_OVERLAY_BUFFERS_REQUESTED  (3)
+#define NUM_OVERLAY_BUFFERS_REQUESTED  (4)
 
 using namespace android;
 
