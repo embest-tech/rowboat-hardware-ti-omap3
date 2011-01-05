@@ -24,9 +24,11 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
 #define VIDEO_DEVICE        "/dev/video0"
-#define PREVIEW_WIDTH        352
-#define PREVIEW_HEIGHT       288
+#define PREVIEW_WIDTH        320
+#define PREVIEW_HEIGHT       240
 #define PIXEL_FORMAT        V4L2_PIX_FMT_YUYV
 
 #include <cutils/properties.h>
@@ -39,10 +41,27 @@ namespace android {
 
 wp<CameraHardwareInterface> CameraHardware::singleton;
 
+/* 29/12/10 : preview/picture size validation logic */
+const char CameraHardware::supportedPictureSizes [] = "1600x1200,1024x768,640x480,352x288,320x240";
+const char CameraHardware::supportedPreviewSizes [] = "1600x1200,1024x768,640x480,352x288,320x240";
+
+const supported_resolution CameraHardware::supportedPictureRes[] = {{1600, 1200} ,
+																	{1024, 768} ,
+																	{640, 480} ,
+																	{352, 288} ,
+																	{320, 240} };
+const supported_resolution CameraHardware::supportedPreviewRes[] = {{1600, 1200} ,
+																																		{1024, 768} ,
+																																		{640, 480} ,
+																																		{352, 288} ,
+																																		{320, 240} };
+
+
 CameraHardware::CameraHardware()
                   : mParameters(),
                     mHeap(0),
                     mPreviewHeap(0),
+					 mRawHeap(0),
                     mCamera(0),
                     mPreviewFrameSize(0),
                     mNotifyCb(0),
@@ -73,7 +92,7 @@ void CameraHardware::initDefaultParameters()
     p.setPictureFormat("jpeg");
 
     p.set("jpeg-quality", "100"); // maximum quality
-    p.set("picture-size-values", "1600x1200,1024x768,640x480,352x288,320x240");
+    p.set("picture-size-values", CameraHardware::supportedPictureSizes);
 
     if (setParameters(p) != NO_ERROR) {
         LOGE("Failed to set default parameters?!");
@@ -96,7 +115,7 @@ sp<IMemoryHeap> CameraHardware::getPreviewHeap() const
 sp<IMemoryHeap> CameraHardware::getRawHeap() const
 {
     LOGE("return Raw Heap");
-    return NULL;
+    return mRawHeap;
 }
 
 void CameraHardware::setCallbacks(notify_callback notify_cb,
@@ -129,6 +148,29 @@ bool CameraHardware::msgTypeEnabled(int32_t msgType)
     return (mMsgEnabled & msgType);
 }
 
+bool CameraHardware::validateSize(size_t width, size_t height, const supported_resolution *supRes, size_t count)
+{
+    bool ret = false;
+    status_t stat = NO_ERROR;
+    unsigned int size;
+
+    if ( NULL == supRes ) {
+        LOGE("Invalid resolutions array passed");
+        stat = -EINVAL;
+    }
+
+    if ( NO_ERROR == stat ) {
+        for ( unsigned int i = 0 ; i < count; i++ ) {
+            LOGD( "Validating %d, %d and %d, %d", supRes[i].width, width, supRes[i].height, height);
+            if ( ( supRes[i].width == width ) && ( supRes[i].height == height ) ) {
+                ret = true;
+                break;
+            }
+        }
+    }
+    return ret;
+}
+
 // ---------------------------------------------------------------------------
 static void showFPS(const char *tag)
 {
@@ -151,13 +193,14 @@ int CameraHardware::previewThread()
 {
     Mutex::Autolock lock(mPreviewLock);
     if (!previewStopped) {
-        char *rawFramePointer = mCamera->GrabRawFrame();
+
+      mCamera->GrabRawFrame(mRawHeap->getBase());
 
         mRecordingLock.lock();
         if (mMsgEnabled & CAMERA_MSG_VIDEO_FRAME) {
-            yuyv422_to_yuv420sp((unsigned char *)rawFramePointer,
+            yuyv422_to_yuv420sp((unsigned char *)mRawHeap->getBase(),
                                 (unsigned char *)mRecordingHeap->getBase(),
-                                PREVIEW_WIDTH, PREVIEW_HEIGHT);
+                                mPreviewWidth, mPreviewHeight);
 
             mDataCb(CAMERA_MSG_VIDEO_FRAME, mRecordingBuffer, mCallbackCookie);
             mDataCbTimestamp(systemTime(), CAMERA_MSG_VIDEO_FRAME, mRecordingBuffer, mCallbackCookie);
@@ -165,17 +208,15 @@ int CameraHardware::previewThread()
         mRecordingLock.unlock();
 
         if (mMsgEnabled & CAMERA_MSG_PREVIEW_FRAME) {
-            mCamera->convert((unsigned char *) rawFramePointer,
+            mCamera->convert((unsigned char *) mRawHeap->getBase(),
                              (unsigned char *) mPreviewHeap->getBase(),
-                             PREVIEW_WIDTH, PREVIEW_HEIGHT);
+                             mPreviewWidth, mPreviewHeight);
 
-            yuyv422_to_yuv420sp((unsigned char *)rawFramePointer,
+            yuyv422_to_yuv420sp((unsigned char *)mRawHeap->getBase(),
                               (unsigned char *)mHeap->getBase(),
-                              PREVIEW_WIDTH, PREVIEW_HEIGHT);
+                              mPreviewWidth, mPreviewHeight);
             mDataCb(CAMERA_MSG_PREVIEW_FRAME, mBuffer, mCallbackCookie);
         }
-
-        mCamera->ProcessRawFrameDone();
 
         if (UNLIKELY(mDebugFps)) {
             showFPS("Preview");
@@ -198,12 +239,20 @@ status_t CameraHardware::startPreview()
         return INVALID_OPERATION;
     }
 
-    if (mCamera->Open(VIDEO_DEVICE, PREVIEW_WIDTH, PREVIEW_HEIGHT, PIXEL_FORMAT) < 0) {
+	LOGD("startPreview :opening device!!!!,width:%d,height:%d",mPreviewWidth,mPreviewHeight);
+
+	if(mPreviewWidth <=0 || mPreviewHeight <=0)
+	{
+		LOGE("Preview size is not valid,aborting..Device can not open!!!");
+		return INVALID_OPERATION;
+	}
+
+    if (mCamera->Open(VIDEO_DEVICE, mPreviewWidth, mPreviewHeight, PIXEL_FORMAT) < 0) {
         LOGE("startPreview failed: cannot open device.");
         return UNKNOWN_ERROR;
     }
 
-    mPreviewFrameSize = PREVIEW_WIDTH * PREVIEW_HEIGHT * 2;
+    mPreviewFrameSize = mPreviewWidth * mPreviewHeight * 2;
 
     mHeap = new MemoryHeapBase(mPreviewFrameSize);
     mBuffer = new MemoryBase(mHeap, 0, mPreviewFrameSize);
@@ -214,6 +263,8 @@ status_t CameraHardware::startPreview()
     mRecordingHeap = new MemoryHeapBase(mPreviewFrameSize);
     mRecordingBuffer = new MemoryBase(mRecordingHeap, 0, mPreviewFrameSize);
 
+   mRawHeap = new MemoryHeapBase(mPreviewFrameSize);
+    mRawBuffer = new MemoryBase(mRawHeap, 0, mPreviewFrameSize);
     ret = mCamera->Init();
     if (ret) {
         LOGE("Camera Init fail: %s", strerror(errno));
@@ -393,7 +444,36 @@ status_t CameraHardware::dump(int fd, const Vector<String16>& args) const
 status_t CameraHardware::setParameters(const CameraParameters& params)
 {
     Mutex::Autolock lock(mLock);
+	int width  = 0;
+	int height = 0;
+	params.getPreviewSize(&width,&height);
 
+	LOGD("Set Parameter...!! ");
+
+	/* validate preview size */
+	params.getPreviewSize(&width, &height);
+	LOGD("preview width:%d,height:%d",width,height);
+
+	if ( validateSize(width, height, supportedPreviewRes, ARRAY_SIZE(supportedPreviewRes)) == false ) {
+        LOGE("Preview size not supported");
+        return -EINVAL;
+    }
+	/* set valid preview size */
+	mPreviewWidth  = width;
+	mPreviewHeight = height;
+
+    /* validate picture size */
+	params.getPictureSize(&width, &height);
+	LOGD("picture width:%d,height:%d",width,height);
+
+	if (validateSize(width, height, supportedPictureRes, ARRAY_SIZE(supportedPictureRes)) == false ) {
+        LOGE("Picture size not supported");
+        return -EINVAL;
+    }
+
+
+	/* validate preview & picture format */
+	LOGD("Preview Format:%s,Picture Format:%s",params.getPreviewFormat(),params.getPictureFormat());
     if (strcmp(params.getPreviewFormat(), "yuv422sp") != 0) {
         LOGE("Only yuv422sp preview is supported");
         return -1;

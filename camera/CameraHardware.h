@@ -30,6 +30,11 @@
 
 namespace android {
 
+typedef struct {
+    size_t width;
+    size_t height;
+} supported_resolution;
+
 class CameraHardware : public CameraHardwareInterface {
 public:
     virtual sp<IMemoryHeap> getPreviewHeap() const;
@@ -99,6 +104,9 @@ private:
     void initDefaultParameters();
 
     int previewThread();
+	/* validating supported size */
+	bool validateSize(size_t width, size_t height,
+			const supported_resolution *supRes, size_t count);
 
     static int beginAutoFocusThread(void *cookie);
     int autoFocusThread();
@@ -111,10 +119,12 @@ private:
     Mutex               mRecordingLock;
     CameraParameters    mParameters;
 
-    sp<MemoryHeapBase>  mHeap;         // format: 420
+    sp<MemoryHeapBase>  mHeap;         /* format: 420 */
     sp<MemoryBase>      mBuffer;
     sp<MemoryHeapBase>  mPreviewHeap;
     sp<MemoryBase>      mPreviewBuffer;
+	sp<MemoryHeapBase>  mRawHeap;      /* format: 422 */
+	sp<MemoryBase>      mRawBuffer;
     sp<MemoryHeapBase>  mRecordingHeap;
     sp<MemoryBase>      mRecordingBuffer;
     sp<MemoryBase>      mBuffers[kBufferCount];
@@ -123,7 +133,14 @@ private:
     bool                mPreviewRunning;
     int                 mPreviewFrameSize;
 
-    // protected by mLock
+	int					mPreviewWidth;
+	int					mPreviewHeight;
+	static const supported_resolution supportedPreviewRes[];
+	static const supported_resolution supportedPictureRes[];
+	static const char supportedPictureSizes[];
+	static const char supportedPreviewSizes[];
+
+    /* protected by mLock */
     sp<PreviewThread>   mPreviewThread;
 
     notify_callback     mNotifyCb;

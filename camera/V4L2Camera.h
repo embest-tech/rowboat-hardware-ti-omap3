@@ -58,8 +58,7 @@ public:
     int StopStreaming ();
 
     void GrabPreviewFrame (void *previewBuffer);
-    char *GrabRawFrame();
-    void ProcessRawFrameDone();
+    void GrabRawFrame(void *previewBuffer);
     sp<IMemory> GrabJpegFrame ();
     int savePicture(unsigned char *inputBuffer, const char * filename);
     void convert(unsigned char *buf, unsigned char *rgb, int width, int height);

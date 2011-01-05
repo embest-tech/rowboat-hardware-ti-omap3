@@ -288,7 +288,7 @@ void V4L2Camera::GrabPreviewFrame (void *previewBuffer)
     free(tmpBuffer);
 }
 
-char * V4L2Camera::GrabRawFrame()
+void V4L2Camera::GrabRawFrame(void *previewBuffer)
 {
     int ret;
 
@@ -299,16 +299,12 @@ char * V4L2Camera::GrabRawFrame()
     ret = ioctl(fd, VIDIOC_DQBUF, &videoIn->buf);
     if (ret < 0) {
         LOGE("GrabRawFrame: VIDIOC_DQBUF Failed");
-        return NULL;
+        return;
     }
     nDequeued++;
 
-    return (char *)videoIn->mem[videoIn->buf.index];
-}
+    memcpy(previewBuffer, videoIn->mem[videoIn->buf.index], (size_t) videoIn->buf.bytesused);
 
-void V4L2Camera::ProcessRawFrameDone()
-{
-    int ret;
     ret = ioctl(fd, VIDIOC_QBUF, &videoIn->buf);
     if (ret < 0) {
         LOGE("postGrabRawFrame: VIDIOC_QBUF Failed");
