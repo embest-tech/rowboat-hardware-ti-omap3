@@ -28,6 +28,7 @@ LOCAL_SHARED_LIBRARIES := \
 # do not prelink
 LOCAL_PRELINK_MODULE := false
 
+LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE := libopencorehw
 
 LOCAL_LDLIBS += 
