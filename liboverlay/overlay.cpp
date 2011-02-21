@@ -41,12 +41,12 @@ extern "C" {
 
 #define LOG_FUNCTION_NAME LOGV(" %s %s",  __FILE__, __FUNCTION__)
 
-#define NUM_OVERLAY_BUFFERS_REQUESTED  (8)
+#define NUM_OVERLAY_BUFFERS_REQUESTED  (4)
 #define SHARED_DATA_MARKER             (0x68759746) // OVRLYSHM on phone keypad
 
 /* These values should come from Surface Flinger */
 #define LCD_WIDTH 480
-#define LCD_HEIGHT 854
+#define LCD_HEIGHT 640
 
 #define CACHEABLE_BUFFERS 0x1
 
@@ -418,7 +418,7 @@ static int overlay_get(struct overlay_control_device_t *dev, int name)
 static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
                                         uint32_t w, uint32_t h, int32_t  format)
 {
-    LOGD("overlay_createOverlay:IN w=%d h=%d format=%d\n", w, h, format);
+    LOGD("overlay_createOverlay:IN w=%d h=%d format=0x%x\n", w, h, format);
     LOG_FUNCTION_NAME;
 
     overlay_object            *overlay;
@@ -432,7 +432,7 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
 
     if (format == OVERLAY_FORMAT_DEFAULT)
     {
-        format = OVERLAY_FORMAT_YCbYCr_422_I;
+        format = OVERLAY_FORMAT_CbYCrY_422_I;
     }
 
     if (ctx->overlay_video1) {
@@ -462,7 +462,7 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
         goto error1;
     }
 
-    if (v4l2_overlay_set_rotation(fd, 0, 0)) {
+    if (v4l2_overlay_set_rotation(fd, 90, 0)) {
         LOGE("Failed defaulting rotation\n");
         goto error1;
     }
@@ -478,6 +478,8 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
         goto error1;
    }
    ctx->overlay_video1 = overlay;
+
+   overlay->data()->rotation = 90;
 
    overlay->setShared(shared);
 
@@ -682,7 +684,7 @@ static int overlay_commit(struct overlay_control_device_t *dev,
     LOGI("Position/X%d/Y%d/W%d/H%d\n", data->posX, data->posY, data->posW,
          data->posH);
     LOGI("Adjusted Position/X%d/Y%d/W%d/H%d\n", stage->posX, stage->posY,
-         stage->posW, data->posH);
+         stage->posW, stage->posH);
     LOGI("Rotation/%d\n", stage->rotation );
 
     if ((ret = disable_streaming_locked(shared, fd)))
@@ -988,15 +990,15 @@ int overlay_queueBuffer(struct overlay_data_device_t *dev,
     }
     pthread_mutex_unlock(&ctx->shared->lock);
 
+    int rc = v4l2_overlay_q_buf( ctx->ctl_fd, (int)buffer );
+    if (rc == 0 && ctx->qd_buf_count < ctx->num_buffers) {
+        ctx->qd_buf_count ++;
+    }
+
     // Catch the case where the data side had no need to set the crop window
     if (!ctx->shared->dataReady) {
         ctx->shared->dataReady = 1;
         enable_streaming(ctx->shared, ctx->ctl_fd);
-    }
-
-    int rc = v4l2_overlay_q_buf( ctx->ctl_fd, (int)buffer );
-    if (rc == 0 && ctx->qd_buf_count < ctx->num_buffers) {
-        ctx->qd_buf_count ++;
     }
 
     return rc;

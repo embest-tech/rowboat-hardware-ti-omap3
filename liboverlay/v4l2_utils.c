@@ -477,7 +477,7 @@ int v4l2_overlay_set_local_alpha(int fd, int enable)
     else
         fbuf.flags &= ~V4L2_FBUF_FLAG_LOCAL_ALPHA;
 
-    ret = v4l2_overlay_ioctl(fd, VIDIOC_S_FBUF, &fbuf, "enable global alpha");
+    ret = v4l2_overlay_ioctl(fd, VIDIOC_S_FBUF, &fbuf, "enable local alpha");
 
     return ret;
 }
@@ -586,7 +586,7 @@ int v4l2_overlay_stream_on(int fd)
     int ret;
     uint32_t type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
 
-    ret = v4l2_overlay_set_local_alpha(fd, 1);
+    ret = v4l2_overlay_set_local_alpha(fd, 0);
     if (ret)
         return ret;
 
