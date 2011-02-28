@@ -1,5 +1,6 @@
 LOCAL_PATH:= $(call my-dir)
 
+ifneq ($(USE_CAMERA_STUB),true)
 #
 # libcamera
 #
@@ -27,5 +28,6 @@ LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE:= libcamera
 
 include $(BUILD_SHARED_LIBRARY)
+endif
 
 include $(all-subdir-makefiles)
