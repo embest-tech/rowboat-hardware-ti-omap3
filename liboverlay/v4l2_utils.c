@@ -416,6 +416,10 @@ int v4l2_overlay_set_position(int fd, int32_t x, int32_t y, int32_t w, int32_t h
     struct v4l2_format format;
     int ret;
 
+    int video_w, video_h, video_fmt, tw, th;
+
+    v4l2_overlay_get_input_size_and_format(fd, &video_w, &video_h, &video_fmt);
+
      /* configure the src format pix */
     /* configure the dst v4l2_overlay window */
     format.type = V4L2_BUF_TYPE_VIDEO_OVERLAY;
@@ -423,15 +427,32 @@ int v4l2_overlay_set_position(int fd, int32_t x, int32_t y, int32_t w, int32_t h
                              "get v4l2_overlay format");
     if (ret)
        return ret;
-    LOGI("v4l2_overlay_set_position:: w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
-   
-    configure_window(&format.fmt.win, w, h, x, y);
+    LOGI("v4l2_overlay_set_position:: original w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
 
+    /* set the overlay to full display window if overlay is
+     * smaller than video buffer */
+    if (video_w > w || video_h > h) {
+        LOGI("v4l2_overlay_set_position:: video %dx%d, disp %dx%d", video_w, video_h, w, h);
+        configure_window(&format.fmt.win, video_w, video_h, 0, 0);
+    } else {
+        configure_window(&format.fmt.win, w, h, x, y);
+    }
+
+    LOGI("v4l2_overlay_set_position:: set to w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
     format.type = V4L2_BUF_TYPE_VIDEO_OVERLAY;
     ret = v4l2_overlay_ioctl(fd, VIDIOC_S_FMT, &format,
                              "set v4l2_overlay format");
-    LOGI("v4l2_overlay_set_position:: w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
-    
+    LOGI("v4l2_overlay_set_position:: new w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
+
+    /* crop the video buffer to the full display window size in 
+     * the center if overlay is smaller than video buffer,
+     * so no DSS down scaling in the case */
+    if (video_w > w || video_h > h) {
+        tw = format.fmt.win.w.width;
+        th = format.fmt.win.w.height;
+        v4l2_overlay_set_crop(fd, (video_w-tw)/2, (video_h-th)/2, tw, th);
+    }
+
     if (ret)
        return ret;
     v4l2_overlay_dump_state(fd);
