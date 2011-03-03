@@ -89,14 +89,44 @@ static int s_device_close(hw_device_t* device)
 
 static const int DEFAULT_SAMPLE_RATE = ALSA_DEFAULT_SAMPLE_RATE;
 
+static void setScoControls(uint32_t devices, int mode);
 static void setDefaultControls(uint32_t devices, int mode);
 
 typedef void (*AlsaControlSet)(uint32_t devices, int mode);
 
+#define OMAP3_OUT_SCO      (\
+        AudioSystem::DEVICE_OUT_BLUETOOTH_SCO |\
+        AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_HEADSET |\
+        AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_CARKIT)
+
+#define OMAP3_OUT_DEFAULT   (\
+        AudioSystem::DEVICE_OUT_ALL &\
+        ~OMAP3_OUT_SCO)
+
+#define OMAP3_IN_SCO        (\
+        AudioSystem::DEVICE_IN_BLUETOOTH_SCO_HEADSET)
+
+#define OMAP3_IN_DEFAULT    (\
+        AudioSystem::DEVICE_IN_ALL &\
+        ~OMAP3_IN_SCO)
+
 static alsa_handle_t _defaults[] = {
     {
         module      : 0,
-        devices     : AudioSystem::DEVICE_OUT_ALL,
+        devices     : OMAP3_OUT_SCO,
+        curDev      : 0,
+        curMode     : 0,
+        handle      : 0,
+        format      : SND_PCM_FORMAT_S16_LE, // AudioSystem::PCM_16_BIT
+        channels    : 2,
+        sampleRate  : DEFAULT_SAMPLE_RATE, // should ideally be 8000
+        latency     : 200000, // Desired Delay in usec
+        bufferSize  : DEFAULT_SAMPLE_RATE / 5, // Desired Number of samples
+        modPrivate  : (void *)&setScoControls,
+    },
+    {
+        module      : 0,
+        devices     : OMAP3_OUT_DEFAULT,
         curDev      : 0,
         curMode     : 0,
         handle      : 0,
@@ -109,7 +139,20 @@ static alsa_handle_t _defaults[] = {
     },
     {
         module      : 0,
-        devices     : AudioSystem::DEVICE_IN_ALL,
+        devices     : OMAP3_IN_SCO,
+        curDev      : 0,
+        curMode     : 0,
+        handle      : 0,
+        format      : SND_PCM_FORMAT_S16_LE, // AudioSystem::PCM_16_BIT
+        channels    : 1,
+        sampleRate  : AudioRecord::DEFAULT_SAMPLE_RATE,
+        latency     : 250000, // Desired Delay in usec
+        bufferSize  : 2048, // Desired Number of samples
+        modPrivate  : (void *)&setScoControls,
+    },
+    {
+        module      : 0,
+        devices     : OMAP3_IN_DEFAULT,
         curDev      : 0,
         curMode     : 0,
         handle      : 0,
@@ -363,6 +406,11 @@ status_t setSoftwareParams(alsa_handle_t *handle)
     snd_pcm_sw_params_free(softwareParams);
 
     return err;
+}
+
+void setScoControls(uint32_t devices, int mode)
+{
+    LOGV("%s", __FUNCTION__);
 }
 
 /* Currently Controls are configured/supported for the following Output
