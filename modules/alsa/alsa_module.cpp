@@ -21,6 +21,8 @@
 #include "AudioHardwareALSA.h"
 #include <media/AudioRecord.h>
 
+#define BLUETOOTH_SCO_DEVICE "hw:0,1"
+
 #ifndef ALSA_DEFAULT_SAMPLE_RATE
 #define ALSA_DEFAULT_SAMPLE_RATE 44100 // in Hz
 #endif
@@ -170,6 +172,9 @@ static alsa_handle_t _defaults[] = {
 /* FIXME: deviceName to return the correct string handle to ALSAMixer instead of default */
 const char *deviceName(alsa_handle_t *handle, uint32_t device, int mode)
 {
+    if (device & OMAP3_OUT_SCO || device & OMAP3_IN_SCO)
+        return BLUETOOTH_SCO_DEVICE;
+
     return "default";
 }
 
