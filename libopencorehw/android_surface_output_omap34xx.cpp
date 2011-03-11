@@ -420,6 +420,9 @@ PVMFStatus AndroidSurfaceOutputOmap34xx::writeFrameBuf(uint8* aData, uint32 aDat
     
     nActualBuffersInDSS = mOverlay->queueBuffer(sWriteRespData[aIndex].ptr);
     if (nActualBuffersInDSS < 0) {
+        // set the state to UNUSED since the buffer will
+        // be sent back to upstream immediately
+        sWriteRespData[aIndex].state = WRD_STATE_UNUSED;
         LOGE("overlay queue buffer returns %d ", nActualBuffersInDSS);
         eStatus = PVMFErrArgument; // Queue failed
     }
