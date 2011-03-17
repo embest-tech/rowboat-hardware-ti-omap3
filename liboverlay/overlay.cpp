@@ -668,9 +668,10 @@ static int overlay_commit(struct overlay_control_device_t *dev,
         stage->posH = tmp_stage.posW;
     }
 
+    /* If Rotation has changed but window has not changed yet, ignore this commit.
+       SurfaceFlinger will set the right window parameters and call commit again. */
     if (data->posX == stage->posX && data->posY == stage->posY &&
-        data->posW == stage->posW && data->posH == stage->posH &&
-        data->rotation == stage->rotation) {
+        data->posW == stage->posW && data->posH == stage->posH) {
         LOGI("Nothing to do!\n");
         goto end;
     }
@@ -699,19 +700,17 @@ static int overlay_commit(struct overlay_control_device_t *dev,
         }
     }
 
-    if (!(stage->posX == data->posX && stage->posY == data->posY &&
-        stage->posW == data->posW && stage->posH == data->posH)) {
-        ret = v4l2_overlay_set_position(fd, stage->posX, stage->posY,
-                                        stage->posW, stage->posH);
-        if (ret) {
-            LOGE("Set Position Failed!/%d\n", ret);
-            goto end;
-        }
-        data->posX = stage->posX;
-        data->posY = stage->posY;
-        data->posW = stage->posW;
-        data->posH = stage->posH;
+    // stage->pos# != data->pos# if reach here
+    ret = v4l2_overlay_set_position(fd, stage->posX, stage->posY,
+                                    stage->posW, stage->posH);
+    if (ret) {
+        LOGE("Set Position Failed!/%d\n", ret);
+        goto end;
     }
+    data->posX = stage->posX;
+    data->posY = stage->posY;
+    data->posW = stage->posW;
+    data->posH = stage->posH;
 
     ret = enable_streaming_locked(shared, fd);
 
