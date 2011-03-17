@@ -453,6 +453,12 @@ int v4l2_overlay_set_position(int fd, int32_t x, int32_t y, int32_t w, int32_t h
         v4l2_overlay_set_crop(fd, (video_w-tw)/2, (video_h-th)/2, tw, th);
     }
 
+    /* set cropping will change overlay fmt so re-set again to correct it */
+    format.type = V4L2_BUF_TYPE_VIDEO_OVERLAY;
+    ret = v4l2_overlay_ioctl(fd, VIDIOC_S_FMT, &format,
+                             "set v4l2_overlay format");
+    LOGI("v4l2_overlay_set_position:: again w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
+
     if (ret)
        return ret;
     v4l2_overlay_dump_state(fd);
