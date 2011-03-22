@@ -125,8 +125,6 @@ private:
     sp<MemoryBase>      mPreviewBuffer;
 	sp<MemoryHeapBase>  mRawHeap;      /* format: 422 */
 	sp<MemoryBase>      mRawBuffer;
-    sp<MemoryHeapBase>  mRecordingHeap;
-    sp<MemoryBase>      mRecordingBuffer;
     sp<MemoryBase>      mBuffers[kBufferCount];
 
     V4L2Camera         *mCamera;

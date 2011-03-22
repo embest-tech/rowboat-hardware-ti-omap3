@@ -36,7 +36,6 @@
 #define UNLIKELY(exp) (__builtin_expect( (exp) != 0, false ))
 #endif
 static int mDebugFps = 0;
-static nsecs_t frameInterval = 0;
 namespace android {
 
 /* 29/12/10 : preview/picture size validation logic */
@@ -98,6 +97,7 @@ void CameraHardware::initDefaultParameters()
 	p.set(CameraParameters::KEY_SUPPORTED_PICTURE_FORMATS, CameraParameters::PIXEL_FORMAT_JPEG);
 	p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_SIZES, CameraHardware::supportedPreviewSizes);
 	p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FORMATS, CameraParameters::PIXEL_FORMAT_YUV422SP);
+	p.set(CameraParameters::KEY_VIDEO_FRAME_FORMAT, CameraParameters::PIXEL_FORMAT_YUV420SP);
 
     if (setParameters(p) != NO_ERROR) {
         LOGE("Failed to set default parameters?!");
@@ -213,14 +213,13 @@ int CameraHardware::previewThread()
 
 		mCamera->GrabRawFrame(mRawHeap->getBase(),mPreviewWidth,mPreviewHeight);
 
+		yuyv422_to_yuv420sp((unsigned char *)mRawHeap->getBase(),
+		                             (unsigned char *)mHeap->getBase(),
+		                              mPreviewWidth, mPreviewHeight);
+
         mRecordingLock.lock();
         if (mMsgEnabled & CAMERA_MSG_VIDEO_FRAME) {
-            yuyv422_to_yuv420sp((unsigned char *)mRawHeap->getBase(),
-                                (unsigned char *)mRecordingHeap->getBase(),
-                                mPreviewWidth, mPreviewHeight);
-
-			mDataCb(CAMERA_MSG_VIDEO_FRAME, mRecordingBuffer, mCallbackCookie);
-            mDataCbTimestamp(systemTime(), CAMERA_MSG_VIDEO_FRAME, mRecordingBuffer, mCallbackCookie);
+        	mDataCbTimestamp(systemTime(), CAMERA_MSG_VIDEO_FRAME, mBuffer, mCallbackCookie);
         }
         mRecordingLock.unlock();
 
@@ -229,9 +228,7 @@ int CameraHardware::previewThread()
                              (unsigned char *) mPreviewHeap->getBase(),
                              mPreviewWidth, mPreviewHeight);
 
-            yuyv422_to_yuv420sp((unsigned char *)mRawHeap->getBase(),
-                              (unsigned char *)mHeap->getBase(),
-                              mPreviewWidth, mPreviewHeight);
+
 
             mDataCb(CAMERA_MSG_PREVIEW_FRAME, mBuffer, mCallbackCookie);
         }
@@ -247,6 +244,7 @@ status_t CameraHardware::startPreview()
 {
 
 	int width, height;
+	int mHeapSize = 0;
     int ret = 0;
     LOG_FUNCTION_START
     if(!mCamera) {
@@ -268,7 +266,7 @@ status_t CameraHardware::startPreview()
 		LOGE("Preview size is not valid,aborting..Device can not open!!!");
 		return INVALID_OPERATION;
 	}
-	ret = mCamera->Configure(mPreviewWidth,mPreviewHeight,V4L2_PIX_FMT_YUYV,30);
+	ret = mCamera->Configure(mPreviewWidth,mPreviewHeight,PIXEL_FORMAT,30);
 	if(ret < 0)
 	{
 		LOGE("Fail to configure camera device");
@@ -293,10 +291,11 @@ status_t CameraHardware::startPreview()
 	}
 
     mPreviewFrameSize = mPreviewWidth * mPreviewHeight * 2;
+    mHeapSize = (mPreviewWidth * mPreviewHeight * 3) >> 1;
 
-
-    mHeap = new MemoryHeapBase(mPreviewFrameSize);
-    mBuffer = new MemoryBase(mHeap, 0, mPreviewFrameSize);
+    /* mHead is yuv420 buffer, as default encoding is yuv420 */
+    mHeap = new MemoryHeapBase(mHeapSize);
+    mBuffer = new MemoryBase(mHeap, 0, mHeapSize);
 
     mPreviewHeap = new MemoryHeapBase(mPreviewFrameSize);
     mPreviewBuffer = new MemoryBase(mPreviewHeap, 0, mPreviewFrameSize);
@@ -365,14 +364,6 @@ status_t CameraHardware::startRecording()
     mParameters.getPreviewSize(&mPreviewWidth, &mPreviewHeight);
     LOGD("getPreviewSize width:%d,height:%d",mPreviewWidth,mPreviewHeight);
 
-    mPreviewFrameSize = mPreviewWidth * mPreviewHeight * 2;
-    mRecordingHeap = new MemoryHeapBase(mPreviewFrameSize);
-    mRecordingBuffer = new MemoryBase(mRawHeap, 0, mPreviewFrameSize);
-
-    int framerate = mParameters.getPreviewFrameRate();
-    frameInterval = 1000000000LL / framerate;
-
-    memset((unsigned char *)mRecordingHeap->getBase(),0x88,mPreviewFrameSize);
     mRecordingLock.unlock();
     return NO_ERROR;
 
@@ -382,9 +373,6 @@ void CameraHardware::stopRecording()
 {
     LOGE("stopRecording");
     mRecordingLock.lock();
-
-    mRecordingBuffer.clear();
-    mRecordingHeap.clear();
 
     mRecordingEnabled = false;
     mRecordingLock.unlock();
