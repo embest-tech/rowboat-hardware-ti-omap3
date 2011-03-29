@@ -20,6 +20,7 @@ LOCAL_SHARED_LIBRARIES :=       \
         libdl					\
         libsurfaceflinger_client
 
+LOCAL_MODULE_TAGS := eng
 LOCAL_MODULE := libstagefrighthw
 
 include $(BUILD_SHARED_LIBRARY)
