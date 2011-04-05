@@ -17,10 +17,15 @@ LOCAL_PATH:= $(call my-dir)
 # hw/<COPYPIX_HARDWARE_MODULE_ID>.<ro.product.board>.so
 
 include $(CLEAR_VARS)
-#ifneq ($(strip $(TARGET_PRODUCT)),am3517evm)
-#LOCAL_CFLAGS := -DHAS_ISP=1
-#endif
+# if build without DSP acceleration
+ifeq ($(strip $(DSP_PATH)),)
+ifneq ($(strip $(TARGET_PRODUCT)),am3517evm)
+LOCAL_CFLAGS := -DHAS_ISP=1
+endif
+else
+# if build with DSP acceleration
 LOCAL_CFLAGS := -DOVERLAY_USERPTR_BUFFER
+endif
 LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 LOCAL_SHARED_LIBRARIES := liblog libcutils

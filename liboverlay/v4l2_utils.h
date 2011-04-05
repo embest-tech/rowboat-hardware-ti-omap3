@@ -4,8 +4,12 @@
 #ifndef ANDROID_ZOOM_REPO_HARDWARE_TI_OMAP3_LIBOVERLAY_V4L2_UTILS_H_
 #define ANDROID_ZOOM_REPO_HARDWARE_TI_OMAP3_LIBOVERLAY_V4L2_UTILS_H_
 
+#ifdef OVERLAY_USERPTR_BUFFER
 #define NUM_OVERLAY_BUFFERS_REQUESTED  (4)
 #define NUM_QUEUED_BUFFERS_OPTIMAL     (4)  /* number of queued buffers before dequque */
+#else
+#define NUM_OVERLAY_BUFFERS_REQUESTED  (3)
+#endif
 
 int v4l2_overlay_open(int id);
 int v4l2_resizer_open(void);

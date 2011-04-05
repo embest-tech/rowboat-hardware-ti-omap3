@@ -416,9 +416,11 @@ int v4l2_overlay_set_position(int fd, int32_t x, int32_t y, int32_t w, int32_t h
     struct v4l2_format format;
     int ret;
 
+#ifdef OVERLAY_USERPTR_BUFFER
     int video_w, video_h, video_fmt, tw, th;
 
     v4l2_overlay_get_input_size_and_format(fd, &video_w, &video_h, &video_fmt);
+#endif
 
      /* configure the src format pix */
     /* configure the dst v4l2_overlay window */
@@ -429,14 +431,18 @@ int v4l2_overlay_set_position(int fd, int32_t x, int32_t y, int32_t w, int32_t h
        return ret;
     LOGI("v4l2_overlay_set_position:: original w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
 
+#ifdef OVERLAY_USERPTR_BUFFER
     /* set the overlay to full display window if overlay is
      * smaller than video buffer */
     if (video_w > w || video_h > h) {
         LOGI("v4l2_overlay_set_position:: video %dx%d, disp %dx%d", video_w, video_h, w, h);
         configure_window(&format.fmt.win, video_w, video_h, 0, 0);
     } else {
+#endif
         configure_window(&format.fmt.win, w, h, x, y);
+#ifdef OVERLAY_USERPTR_BUFFER
     }
+#endif
 
     LOGI("v4l2_overlay_set_position:: set to w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
     format.type = V4L2_BUF_TYPE_VIDEO_OVERLAY;
@@ -444,6 +450,7 @@ int v4l2_overlay_set_position(int fd, int32_t x, int32_t y, int32_t w, int32_t h
                              "set v4l2_overlay format");
     LOGI("v4l2_overlay_set_position:: new w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
 
+#ifdef OVERLAY_USERPTR_BUFFER
     /* crop the video buffer to the full display window size in 
      * the center if overlay is smaller than video buffer,
      * so no DSS down scaling in the case */
@@ -458,6 +465,7 @@ int v4l2_overlay_set_position(int fd, int32_t x, int32_t y, int32_t w, int32_t h
     ret = v4l2_overlay_ioctl(fd, VIDIOC_S_FMT, &format,
                              "set v4l2_overlay format");
     LOGI("v4l2_overlay_set_position:: again w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
+#endif
 
     if (ret)
        return ret;
@@ -656,6 +664,9 @@ int v4l2_overlay_req_buf(int fd, uint32_t *num_bufs, int cacheable_buffers)
         error(fd, "VIDIOC_REQBUFS failed");
         return -ENOMEM;
     }
+#ifndef OVERLAY_USERPTR_BUFFER
+    *num_bufs = reqbuf.count;
+#endif
     LOGI("buffer cookie is %d\n", reqbuf.type);
     return 0;
 }
@@ -664,22 +675,6 @@ int v4l2_overlay_req_buf(int fd, uint32_t *num_bufs, int cacheable_buffers)
 static int is_mmaped(struct v4l2_buffer *buf)
 {
     return buf->flags == V4L2_BUF_FLAG_MAPPED;
-}
-#endif
-
-#if 0
-static int is_queued(struct v4l2_buffer *buf)
-{
-    /* is either on the input or output queue in the kernel */
-    return (buf->flags & V4L2_BUF_FLAG_QUEUED) ||
-           (buf->flags & V4L2_BUF_FLAG_DONE);
-}
-
-static int is_dequeued(struct v4l2_buffer *buf)
-{
-    /* is on neither input or output queue in kernel */
-    return (!(buf->flags & V4L2_BUF_FLAG_QUEUED) &&
-            !(buf->flags & V4L2_BUF_FLAG_DONE));
 }
 #endif
 
@@ -784,12 +779,13 @@ int v4l2_overlay_stream_off(int fd)
 
 #ifdef OVERLAY_USERPTR_BUFFER
 int v4l2_overlay_q_buf(int fd, void *ptr, size_t len)
-#else
-int v4l2_overlay_q_buf(int fd, int index)
-#endif
 {
     /* FIXME not idea to track qbuf index */
     static int index = 0;
+#else
+int v4l2_overlay_q_buf(int fd, int index)
+{
+#endif
     struct v4l2_buffer buf;
     int ret;
 
