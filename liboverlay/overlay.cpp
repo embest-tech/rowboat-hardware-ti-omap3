@@ -48,8 +48,6 @@ extern "C" {
 #define LCD_WIDTH 480
 #define LCD_HEIGHT 640
 
-#define CACHEABLE_BUFFERS 0x1
-
 #define ALL_BUFFERS_FLUSHED -66 //shared with Camera/Video Playback HAL
 
 typedef struct

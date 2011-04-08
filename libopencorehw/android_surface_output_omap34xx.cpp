@@ -57,8 +57,6 @@ extern "C" {
 #include "v4l2_utils.h"
 }
 
-#define CACHEABLE_BUFFERS 0x1
-
 using namespace android;
 
 static void convertYuv420ToYuv422(int width, int height, void* src, void* dst);

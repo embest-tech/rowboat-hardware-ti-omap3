@@ -26,8 +26,6 @@
 
 #include "v4l2_utils.h"
 
-#define CACHEABLE_BUFFERS 0x1
-
 #define UNLIKELY( exp ) (__builtin_expect( (exp) != 0, false ))
 
 namespace android {
