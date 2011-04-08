@@ -93,12 +93,19 @@ TIHardwareRenderer::TIHardwareRenderer(
     mOverlay = new Overlay(ref);
     mOverlay->setParameter(CACHEABLE_BUFFERS, 0);
 
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+    if (colorFormat == OMX_COLOR_FormatYUV420Planar) {
+        mOverlay->setParameter(BUFFER_TYPE, EMEMORY_MMAP);
+#endif
     for (size_t i = 0; i < (size_t)mOverlay->getBufferCount(); ++i) {
         mapping_data_t *data =
             (mapping_data_t *)mOverlay->getBufferAddress((void *)i);
 
         mOverlayAddresses.push(data->ptr);
     }
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+    }
+#endif
 
     char value[PROPERTY_VALUE_MAX];
     property_get("debug.video.showfps", value, "0");
@@ -186,39 +193,17 @@ void TIHardwareRenderer::render(
         return;
     }
 
-#if 0
-    size_t i = 0;
-    for (; i < mOverlayAddresses.size(); ++i) {
-        if (mOverlayAddresses[i] == data) {
-            break;
-        }
-
-        if (mIsFirstFrame) {
-            LOGI("overlay buffer #%d: %p", i, mOverlayAddresses[i]);
-        }
-    }
-
-    if (i == mOverlayAddresses.size()) {
-        LOGE("No suitable overlay buffer found.");
-        return;
-    }
-
-    mOverlay->queueBuffer((void *)i);
-
-    overlay_buffer_t overlay_buffer;
-    if (!mIsFirstFrame) {
-        CHECK_EQ(mOverlay->dequeueBuffer(&overlay_buffer), OK);
-    } else {
-        mIsFirstFrame = false;
-    }
-#else
     if (mColorFormat == OMX_COLOR_FormatYUV420Planar) {
         convertYuv420ToYuv422(
                 mDecodedWidth, mDecodedHeight, data, mOverlayAddresses[mIndex]);
     } else {
+//#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+        // queue the dsp buffer
+//#else
         CHECK_EQ(mColorFormat, OMX_COLOR_FormatCbYCrY);
 
         memcpy(mOverlayAddresses[mIndex], data, size);
+//#endif
     }
 
     if (mOverlay->queueBuffer((void *)mIndex) == ALL_BUFFERS_FLUSHED) {
@@ -244,7 +229,6 @@ void TIHardwareRenderer::render(
     } else {
         mIsFirstFrame = false;
     }
-#endif
 }
 
 }  // namespace android

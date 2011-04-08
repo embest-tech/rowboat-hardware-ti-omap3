@@ -6,7 +6,11 @@
 
 int v4l2_overlay_open(int id);
 int v4l2_overlay_get_caps(int fd, struct v4l2_capability *caps);
+#ifndef OVERLAY_SUPPORT_USERPTR_BUF
 int v4l2_overlay_req_buf(int fd, uint32_t *num_bufs, int cacheable_buffers);
+#else
+int v4l2_overlay_req_buf(int fd, uint32_t *num_bufs, int cacheable_buffers, int memtype);
+#endif
 int v4l2_overlay_query_buffer(int fd, int index, struct v4l2_buffer *buf);
 int v4l2_overlay_map_buf(int fd, int index, void **start, size_t *len);
 int v4l2_overlay_unmap_buf(void *start, size_t len);
@@ -35,6 +39,13 @@ enum {
   V4L2_OVERLAY_PLANE_VIDEO2,
 };
 
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+enum {
+    EMEMORY_MMAP,
+    EMEMORY_USERPTR,
+};
+#endif
+
 typedef struct
 {
   int fd;
@@ -44,6 +55,7 @@ typedef struct
 } mapping_data_t;
 
 #define CACHEABLE_BUFFERS 0x1
+#define BUFFER_TYPE       0x2
 
 #define ALL_BUFFERS_FLUSHED -66
 

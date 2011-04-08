@@ -20,7 +20,14 @@ include $(CLEAR_VARS)
 LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 LOCAL_SHARED_LIBRARIES := liblog libcutils
-LOCAL_SRC_FILES := v4l2_utils.c overlay.cpp
+
+ifdef OMAP_ENHANCEMENT
+LOCAL_SRC_FILES := overlay_ex.cpp
+else
+LOCAL_SRC_FILES := overlay.cpp
+endif
+LOCAL_SRC_FILES += v4l2_utils.c
+
 LOCAL_MODULE_TAGS := eng
 LOCAL_MODULE := overlay.omap3
 include $(BUILD_SHARED_LIBRARY)
