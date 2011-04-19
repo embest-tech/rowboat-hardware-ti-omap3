@@ -71,6 +71,10 @@ TIHardwareRenderer::TIHardwareRenderer(
       mColorFormat(colorFormat),
       mInitCheck(NO_INIT),
       mFrameSize(mDecodedWidth * mDecodedHeight * 2),
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+      nOverlayBuffersQueued(0),
+      release_frame_cb(0),
+#endif
       mIsFirstFrame(true),
       mIndex(0) {
     CHECK(mISurface.get() != NULL);
@@ -94,7 +98,10 @@ TIHardwareRenderer::TIHardwareRenderer(
     mOverlay->setParameter(CACHEABLE_BUFFERS, 0);
 
 #ifdef OVERLAY_SUPPORT_USERPTR_BUF
-    if (colorFormat == OMX_COLOR_FormatYUV420Planar) {
+    if (colorFormat == OMX_COLOR_FormatCbYCrY) {
+        for (int i=0; i<NUM_OVERLAY_BUFFERS_REQUESTED; i++)
+            buffers_queued_to_dss[i].state = WRD_STATE_UNUSED;
+    } else {
         mOverlay->setParameter(BUFFER_TYPE, EMEMORY_MMAP);
 #endif
     for (size_t i = 0; i < (size_t)mOverlay->getBufferCount(); ++i) {
@@ -121,7 +128,7 @@ TIHardwareRenderer::~TIHardwareRenderer() {
         mOverlay.clear();
 
         // XXX apparently destroying an overlay is an asynchronous process...
-        sleep(1);
+        //sleep(1);
     }
 }
 
@@ -197,13 +204,76 @@ void TIHardwareRenderer::render(
         convertYuv420ToYuv422(
                 mDecodedWidth, mDecodedHeight, data, mOverlayAddresses[mIndex]);
     } else {
-//#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+        overlay_buffer_t overlay_buffer;
+
         // queue the dsp buffer
-//#else
+        for (mIndex = 0; mIndex < NUM_OVERLAY_BUFFERS_REQUESTED; mIndex++) {
+            if (buffers_queued_to_dss[mIndex].state == WRD_STATE_UNUSED)
+                break;
+        }
+
+        if (mIndex == NUM_OVERLAY_BUFFERS_REQUESTED) {
+            LOGE("DSS Queue is full");
+            release_frame_cb(data, cookie);
+            return;
+        }
+
+        int nBuffers_queued_to_dss = mOverlay->queueBuffer((void *)data);
+        if (release_frame_cb) {
+            if (nBuffers_queued_to_dss < 0) {
+                LOGE("Queue buffer failed");
+                release_frame_cb(data, cookie);
+            }
+            else {
+                nOverlayBuffersQueued++;
+                buffers_queued_to_dss[mIndex].ptr = data;
+                buffers_queued_to_dss[mIndex].state = WRD_STATE_INDSSQUEUE;
+
+                if (nBuffers_queued_to_dss != nOverlayBuffersQueued) { // STREAM OFF occurred
+                    //Release all the buffers that were discarded by DSS upon STREAM OFF
+                    for (size_t idx = 0; idx < NUM_OVERLAY_BUFFERS_REQUESTED; idx++) {
+                        if (idx == mIndex)
+                            continue;
+                        if (buffers_queued_to_dss[idx].state == WRD_STATE_INDSSQUEUE) {
+                            nOverlayBuffersQueued--;
+                            buffers_queued_to_dss[idx].state = WRD_STATE_UNUSED;
+                            release_frame_cb(buffers_queued_to_dss[idx].ptr, cookie);
+                            LOGD("Reclaiming the buffer [%p] from Overlay", buffers_queued_to_dss[idx].ptr);
+                        }
+                    }
+                }
+            }
+        }
+
+        // dequeue the dsp buffer
+        int err = mOverlay->dequeueBuffer(&overlay_buffer);
+        if (err == 0) {
+            for (mIndex = 0; mIndex < NUM_OVERLAY_BUFFERS_REQUESTED; mIndex++) {
+                if (buffers_queued_to_dss[mIndex].ptr == (void *)overlay_buffer)
+                    break;
+            }
+
+            if (mIndex == NUM_OVERLAY_BUFFERS_REQUESTED) {
+                LOGE("Dequeued buffer is not in the record");
+                return;
+            }
+
+            nOverlayBuffersQueued--;
+            buffers_queued_to_dss[mIndex].state = WRD_STATE_UNUSED;
+            if (release_frame_cb) {
+                release_frame_cb(buffers_queued_to_dss[mIndex].ptr, cookie);
+            }
+        } else {
+            LOGE("Dequeue buffer failed");
+        }
+
+        return;
+#else
         CHECK_EQ(mColorFormat, OMX_COLOR_FormatCbYCrY);
 
         memcpy(mOverlayAddresses[mIndex], data, size);
-//#endif
+#endif
     }
 
     if (mOverlay->queueBuffer((void *)mIndex) == ALL_BUFFERS_FLUSHED) {
@@ -230,6 +300,15 @@ void TIHardwareRenderer::render(
         mIsFirstFrame = false;
     }
 }
+
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+bool TIHardwareRenderer::setCallback(release_rendered_buffer_callback cb, void *c)
+{
+    release_frame_cb = cb;
+    cookie = c;
+    return true;
+}
+#endif
 
 }  // namespace android
 

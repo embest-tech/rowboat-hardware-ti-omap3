@@ -41,12 +41,11 @@ extern "C" {
 
 #define LOG_FUNCTION_NAME LOGV(" %s %s",  __FILE__, __FUNCTION__)
 
-#define NUM_OVERLAY_BUFFERS_REQUESTED  (4)
 #define SHARED_DATA_MARKER             (0x68759746) // OVRLYSHM on phone keypad
 
 /* These values should come from Surface Flinger */
-#define LCD_WIDTH 480
-#define LCD_HEIGHT 640
+#define LCD_WIDTH 1280
+#define LCD_HEIGHT 720
 
 #define ALL_BUFFERS_FLUSHED -66 //shared with Camera/Video Playback HAL
 
@@ -846,8 +845,10 @@ static int overlay_resizeInput(struct overlay_data_device_t *dev, uint32_t w,
     if ((rc = disable_streaming_locked(ctx->shared, ctx->ctl_fd)))
         goto end;
 
-    for (int i = 0; i < ctx->num_buffers; i++) {
-        v4l2_overlay_unmap_buf(ctx->buffers[i], ctx->buffers_len[i]);      
+    if (ctx->memtype == EMEMORY_MMAP) {
+        for (int i = 0; i < ctx->num_buffers; i++) {
+            v4l2_overlay_unmap_buf(ctx->buffers[i], ctx->buffers_len[i]);      
+        }
     }
 
     rc = v4l2_overlay_init(ctx->ctl_fd, w, h, ctx->format);
@@ -867,9 +868,11 @@ static int overlay_resizeInput(struct overlay_data_device_t *dev, uint32_t w,
         goto end;
     }
 
-    for (int i = 0; i < ctx->num_buffers; i++)
-        v4l2_overlay_map_buf(ctx->ctl_fd, i, &ctx->buffers[i],
-                             &ctx->buffers_len[i]);
+    if (ctx->memtype == EMEMORY_MMAP) {
+        for (int i = 0; i < ctx->num_buffers; i++)
+            v4l2_overlay_map_buf(ctx->ctl_fd, i, &ctx->buffers[i],
+                                 &ctx->buffers_len[i]);
+    }
 
     rc = enable_streaming_locked(ctx->shared, ctx->ctl_fd);
 
@@ -1032,7 +1035,7 @@ int overlay_dequeueBuffer(struct overlay_data_device_t *dev,
 
     struct overlay_data_context_t* ctx = (struct overlay_data_context_t*)dev;
 
-    int rc;
+    int rc = -1;
     int i = -1;
 
     pthread_mutex_lock(&ctx->shared->lock);
@@ -1046,17 +1049,28 @@ int overlay_dequeueBuffer(struct overlay_data_device_t *dev,
 
     // If we are not streaming dequeue will fail, skip to prevent error printouts
     if (ctx->shared->streamEn) {
-        if ((rc = v4l2_overlay_dq_buf( ctx->ctl_fd, &i )) != 0) {
+        if ( ctx->qd_buf_count < NUM_QUEUED_BUFFERS_OPTIMAL &&
+              ctx->memtype == EMEMORY_USERPTR) {
+             LOGI("Queue more buffers before attempting to dequeue");
+             return -1;
+        }
+
+        if ((rc = v4l2_overlay_dq_buf( ctx->ctl_fd, &i, ctx->memtype )) != 0) {
             LOGE("Failed to DQ/%d\n", rc);
+            return rc;
         }
-        else if (i < 0 || i > ctx->num_buffers) {
-            rc = -EINVAL;
-        } else {
-            *((int *)buffer) = i;
+
+        if (ctx->memtype == EMEMORY_USERPTR) {
+            *buffer = (void *)i;
             ctx->qd_buf_count --;
+        } else {
+            if (i < 0 || i > ctx->num_buffers) {
+                rc = -EINVAL;
+            } else {
+                *((int *)buffer) = i;
+                ctx->qd_buf_count --;
+            }
         }
-    } else {
-        rc = -1;
     }
 
     return rc;
@@ -1066,6 +1080,7 @@ int overlay_queueBuffer(struct overlay_data_device_t *dev,
                         overlay_buffer_t buffer) {
 
     struct overlay_data_context_t* ctx = (struct overlay_data_context_t*)dev;
+    int rc;
 
     pthread_mutex_lock(&ctx->shared->lock);
     if ( ctx->shared->streamingReset )
@@ -1074,20 +1089,28 @@ int overlay_queueBuffer(struct overlay_data_device_t *dev,
         pthread_mutex_unlock(&ctx->shared->lock);
         return ALL_BUFFERS_FLUSHED;
     }
-    pthread_mutex_unlock(&ctx->shared->lock);
 
-    int rc = v4l2_overlay_q_buf( ctx->ctl_fd, (int)buffer );
+    if (ctx->memtype == EMEMORY_USERPTR)
+        rc = v4l2_overlay_q_buf_uptr( ctx->ctl_fd, buffer, ctx->buffers_len[0] );
+    else
+        rc = v4l2_overlay_q_buf( ctx->ctl_fd, (int)buffer );
     if (rc == 0 && ctx->qd_buf_count < ctx->num_buffers) {
         ctx->qd_buf_count ++;
+    } else {
+        LOGE("queueBuffer failed [%d]", rc);
     }
 
-    // Catch the case where the data side had no need to set the crop window
-    if (!ctx->shared->dataReady) {
+    if (ctx->shared->streamEn == 0) {
         ctx->shared->dataReady = 1;
-        enable_streaming(ctx->shared, ctx->ctl_fd);
+        enable_streaming_locked(ctx->shared, ctx->ctl_fd);
     }
 
-    return rc;
+    pthread_mutex_unlock(&ctx->shared->lock);
+
+    if (ctx->memtype == EMEMORY_USERPTR) 
+        return ctx->qd_buf_count;
+    else
+        return rc;
 }
 
 void *overlay_getBufferAddress(struct overlay_data_device_t *dev,
@@ -1102,6 +1125,9 @@ void *overlay_getBufferAddress(struct overlay_data_device_t *dev,
     int ret;
     struct v4l2_buffer buf;
     struct overlay_data_context_t* ctx = (struct overlay_data_context_t*)dev;
+
+    if (ctx->memtype == EMEMORY_USERPTR)
+        return NULL;
 
     ret = v4l2_overlay_query_buffer(ctx->ctl_fd, (int)buffer, &buf);
 
@@ -1148,16 +1174,18 @@ static int overlay_data_close(struct hw_device_t *dev) {
 
         pthread_mutex_lock(&ctx->shared->lock);
 
-        for (i = 0; i < ctx->num_buffers; i++) {
-            LOGV("Unmap Buffer/%d/%08lx/%d", i, (unsigned long)ctx->buffers[i], ctx->buffers_len[i] );
-            rc = v4l2_overlay_unmap_buf(ctx->buffers[i], ctx->buffers_len[i]);
-            if (rc != 0) {
-                LOGE("Error unmapping the buffer/%d/%d", i, rc);
+        if (ctx->memtype == EMEMORY_MMAP) {
+            for (i = 0; i < ctx->num_buffers; i++) {
+                LOGV("Unmap Buffer/%d/%08lx/%d", i, (unsigned long)ctx->buffers[i], ctx->buffers_len[i] );
+                rc = v4l2_overlay_unmap_buf(ctx->buffers[i], ctx->buffers_len[i]);
+                if (rc != 0) {
+                    LOGE("Error unmapping the buffer/%d/%d", i, rc);
+                }
             }
-        }
 
-        delete(ctx->mapping_data);
-        delete(ctx->buffers);
+            delete(ctx->mapping_data);
+            delete(ctx->buffers);
+        }
         delete(ctx->buffers_len);
 
         pthread_mutex_unlock(&ctx->shared->lock);

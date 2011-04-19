@@ -23,6 +23,20 @@
 #include <utils/Vector.h>
 
 #include <OMX_Component.h>
+#include "v4l2_utils.h"
+
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+
+enum wrd_state_e {
+    WRD_STATE_UNUSED,
+    WRD_STATE_UNQUEUED,
+    WRD_STATE_INDSSQUEUE
+};
+typedef struct OverlayBufferData_t {
+    const void *ptr;
+    enum wrd_state_e state;
+} OverlayBufferData;
+#endif
 
 namespace android {
 
@@ -44,6 +58,10 @@ public:
     virtual void render(
             const void *data, size_t size, void *platformPrivate);
 
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+    bool setCallback(release_rendered_buffer_callback cb, void *c);
+#endif
+
 private:
     sp<ISurface> mISurface;
     size_t mDisplayWidth, mDisplayHeight;
@@ -53,6 +71,12 @@ private:
     size_t mFrameSize;
     sp<Overlay> mOverlay;
     Vector<void *> mOverlayAddresses;
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+    int nOverlayBuffersQueued;
+    OverlayBufferData buffers_queued_to_dss[NUM_OVERLAY_BUFFERS_REQUESTED];
+    release_rendered_buffer_callback release_frame_cb;
+    void  *cookie;
+#endif
     bool mIsFirstFrame;
     size_t mIndex;
 

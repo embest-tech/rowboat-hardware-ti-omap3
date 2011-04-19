@@ -156,14 +156,6 @@ void v4l2_overlay_dump_state(int fd)
         return;
     LOGI("output crop:\n");
     dump_crop(&crop);
-/*
-    crop.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    ret = ioctl(fd, VIDIOC_G_CROP, &crop);
-    if (ret < 0)
-        return;
-    LOGI("ovelay crop:\n");
-    dump_crop(&crop);
-*/
 }
 
 static void error(int fd, const char *msg)
@@ -482,14 +474,22 @@ int v4l2_overlay_set_local_alpha(int fd, int enable)
     return ret;
 }
 
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+int v4l2_overlay_req_buf(int fd, uint32_t *num_bufs, int cacheable_buffers, int memtype)
+#else
 int v4l2_overlay_req_buf(int fd, uint32_t *num_bufs, int cacheable_buffers)
+#endif
 {
     LOG_FUNCTION_NAME
 
     struct v4l2_requestbuffers reqbuf;
     int ret, i;
     reqbuf.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+    reqbuf.memory = (memtype == EMEMORY_USERPTR) ? V4L2_MEMORY_USERPTR : V4L2_MEMORY_MMAP;
+#else
     reqbuf.memory = V4L2_MEMORY_MMAP;
+#endif
     reqbuf.count = *num_bufs;
     //reqbuf.reserved[0] = cacheable_buffers;
     ret = ioctl(fd, VIDIOC_REQBUFS, &reqbuf);
@@ -497,9 +497,9 @@ int v4l2_overlay_req_buf(int fd, uint32_t *num_bufs, int cacheable_buffers)
         error(fd, "reqbuf ioctl");
         return ret;
     }
-    LOGI("%d buffers allocated %d requested\n", reqbuf.count, 4);
+    LOGI("%d buffers allocated %d requested\n", reqbuf.count, *num_bufs);
     if (reqbuf.count > *num_bufs) {
-        error(fd, "Not enough buffer structs passed to get_buffers");
+        error(fd, "Not enough buffer allcated");
         return -ENOMEM;
     }
     *num_bufs = reqbuf.count;
@@ -510,20 +510,6 @@ int v4l2_overlay_req_buf(int fd, uint32_t *num_bufs, int cacheable_buffers)
 static int is_mmaped(struct v4l2_buffer *buf)
 {
     return buf->flags == V4L2_BUF_FLAG_MAPPED;
-}
-
-static int is_queued(struct v4l2_buffer *buf)
-{
-    /* is either on the input or output queue in the kernel */
-    return (buf->flags & V4L2_BUF_FLAG_QUEUED) ||
-           (buf->flags & V4L2_BUF_FLAG_DONE);
-}
-
-static int is_dequeued(struct v4l2_buffer *buf)
-{
-    /* is on neither input or output queue in kernel */
-    return (!(buf->flags & V4L2_BUF_FLAG_QUEUED) &&
-            !(buf->flags & V4L2_BUF_FLAG_DONE));
 }
 
 int v4l2_overlay_query_buffer(int fd, int index, struct v4l2_buffer *buf)
@@ -611,20 +597,34 @@ int v4l2_overlay_stream_off(int fd)
     return ret;
 }
 
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+int v4l2_overlay_q_buf_uptr(int fd, void *ptr, size_t len)
+{
+    /* FIXME index - not idea to track qbuf index */
+    static int index = 0;
+    struct v4l2_buffer buf;
+    int ret;
+
+    buf.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+    buf.m.userptr = (unsigned long)ptr;
+    buf.index = index++;
+    buf.length = len;
+    buf.memory = V4L2_MEMORY_USERPTR;
+    buf.field = V4L2_FIELD_NONE;
+    buf.timestamp.tv_sec = 0;
+    buf.timestamp.tv_usec = 0;
+    buf.flags = 0;
+    index %= NUM_OVERLAY_BUFFERS_REQUESTED;
+
+    return v4l2_overlay_ioctl(fd, VIDIOC_QBUF, &buf, "qbuf");
+}
+#endif
+
 int v4l2_overlay_q_buf(int fd, int index)
 {
     struct v4l2_buffer buf;
     int ret;
 
-    /*
-    ret = v4l2_overlay_query_buffer(fd, buffer_cookie, index, &buf);
-    if (ret)
-        return ret;
-    if (is_queued(buf)) {
-        LOGE("Trying to queue buffer to kernel that is already queued!\n");
-        return -EINVAL
-    }
-    */
     buf.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
     buf.index = index;
     buf.memory = V4L2_MEMORY_MMAP;
@@ -636,27 +636,30 @@ int v4l2_overlay_q_buf(int fd, int index)
     return v4l2_overlay_ioctl(fd, VIDIOC_QBUF, &buf, "qbuf");
 }
 
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+int v4l2_overlay_dq_buf(int fd, int *index, int memtype)
+#else
 int v4l2_overlay_dq_buf(int fd, int *index)
+#endif
 {
     struct v4l2_buffer buf;
     int ret;
 
-    /*
-    ret = v4l2_overlay_query_buffer(fd, buffer_cookie, index, &buf);
-    if (ret)
-        return ret;
-
-    if (is_dequeued(buf)) {
-        LOGE("Trying to dequeue buffer that is not in kernel!\n");
-        return -EINVAL
-    }
-    */
     buf.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+    buf.memory = (memtype == EMEMORY_USERPTR) ?
+                 V4L2_MEMORY_USERPTR : V4L2_MEMORY_MMAP;
+#else
     buf.memory = V4L2_MEMORY_MMAP;
+#endif
 
     ret = v4l2_overlay_ioctl(fd, VIDIOC_DQBUF, &buf, "dqbuf");
     if (ret)
-      return ret;
+        return errno;
+#ifdef OVERLAY_SUPPORT_USERPTR_BUF
+    *index = (memtype == EMEMORY_USERPTR) ? (int)buf.m.userptr : buf.index;
+#else
     *index = buf.index;
+#endif
     return 0;
 }
