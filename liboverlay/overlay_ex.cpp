@@ -682,7 +682,7 @@ static int overlay_commit(struct overlay_control_device_t *dev,
     if (data->posX == stage->posX && data->posY == stage->posY &&
         data->posW == stage->posW && data->posH == stage->posH &&
         data->rotation == stage->rotation) {
-        LOGI("Nothing to do!\n");
+        LOGV("Nothing to do!\n");
         goto end;
     }
 
