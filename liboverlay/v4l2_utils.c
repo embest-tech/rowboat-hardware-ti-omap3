@@ -569,32 +569,16 @@ int v4l2_overlay_stream_on(int fd)
 {
     LOG_FUNCTION_NAME
 
-    int ret;
     uint32_t type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-
-    ret = v4l2_overlay_set_local_alpha(fd, 0);
-    if (ret)
-        return ret;
-
-    ret = v4l2_overlay_ioctl(fd, VIDIOC_STREAMON, &type, "stream on");
-
-    return ret;
+    return v4l2_overlay_ioctl(fd, VIDIOC_STREAMON, &type, "stream on");
 }
 
 int v4l2_overlay_stream_off(int fd)
 {
     LOG_FUNCTION_NAME
 
-    int ret;
     uint32_t type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-
-    ret = v4l2_overlay_set_local_alpha(fd, 0);
-    if (ret)
-        return ret;
-
-    ret = v4l2_overlay_ioctl(fd, VIDIOC_STREAMOFF, &type, "stream off");
-
-    return ret;
+    return v4l2_overlay_ioctl(fd, VIDIOC_STREAMOFF, &type, "stream off");
 }
 
 #ifdef OVERLAY_SUPPORT_USERPTR_BUF

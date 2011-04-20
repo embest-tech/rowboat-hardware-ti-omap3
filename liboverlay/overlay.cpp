@@ -465,6 +465,12 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
         goto error1;
     }
 
+    /* enable DSS colorkey to make gfx visible on top of video overlay */
+    if (v4l2_overlay_set_colorkey(fd, 1, 0)){
+        LOGE("Failed enabling color key");
+        goto error1;
+    }
+
     if (v4l2_overlay_req_buf(fd, &num, 0)) {
         LOGE("Failed requesting buffers\n");
         goto error1;
