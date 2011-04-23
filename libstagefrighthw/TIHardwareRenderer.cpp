@@ -220,9 +220,14 @@ void TIHardwareRenderer::render(
         }
 
         int nBuffers_queued_to_dss = mOverlay->queueBuffer((void *)data);
+
+        if (nBuffers_queued_to_dss == ALL_BUFFERS_FLUSHED) {
+            nBuffers_queued_to_dss = mOverlay->queueBuffer((void *)data);
+        }
+
         if (release_frame_cb) {
             if (nBuffers_queued_to_dss < 0) {
-                LOGE("Queue buffer failed");
+                LOGE("Queue buffer [%p] failed", data);
                 release_frame_cb(data, cookie);
             }
             else {
