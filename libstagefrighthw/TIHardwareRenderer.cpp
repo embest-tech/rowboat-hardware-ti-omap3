@@ -72,10 +72,9 @@ TIHardwareRenderer::TIHardwareRenderer(
       mInitCheck(NO_INIT),
       mFrameSize(mDecodedWidth * mDecodedHeight * 2),
 #ifdef OVERLAY_SUPPORT_USERPTR_BUF
-      nOverlayBuffersQueued(0),
       release_frame_cb(0),
 #endif
-      mIsFirstFrame(true),
+      nOverlayBuffersQueued(0),
       mIndex(0) {
     CHECK(mISurface.get() != NULL);
     CHECK(mDecodedWidth > 0);
@@ -282,8 +281,9 @@ void TIHardwareRenderer::render(
     }
 
     if (mOverlay->queueBuffer((void *)mIndex) == ALL_BUFFERS_FLUSHED) {
-        mIsFirstFrame = true;
+        nOverlayBuffersQueued = 0;
         if (mOverlay->queueBuffer((void *)mIndex) != 0) {
+            LOGE("Queue buffer [%d] failed", mIndex);
             return;
         }
     }
@@ -293,16 +293,16 @@ void TIHardwareRenderer::render(
     }
 
     overlay_buffer_t overlay_buffer;
-    if (!mIsFirstFrame) {
+    if (++nOverlayBuffersQueued >= NUM_OVERLAY_BUFFERS_REQUESTED) {
         status_t err = mOverlay->dequeueBuffer(&overlay_buffer);
 
         if (err == ALL_BUFFERS_FLUSHED) {
-            mIsFirstFrame = true;
+            nOverlayBuffersQueued = 0;
+        } else if (!err) {
+            nOverlayBuffersQueued--;
         } else {
-            return;
+            LOGE("Dequeue buffer failed");
         }
-    } else {
-        mIsFirstFrame = false;
     }
 }
 

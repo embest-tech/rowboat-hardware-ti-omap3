@@ -41,7 +41,6 @@ extern "C" {
 
 #define LOG_FUNCTION_NAME LOGV(" %s %s",  __FILE__, __FUNCTION__)
 
-#define NUM_OVERLAY_BUFFERS_REQUESTED  (4)
 #define SHARED_DATA_MARKER             (0x68759746) // OVRLYSHM on phone keypad
 
 /* These values should come from Surface Flinger */
@@ -992,18 +991,23 @@ int overlay_queueBuffer(struct overlay_data_device_t *dev,
         pthread_mutex_unlock(&ctx->shared->lock);
         return ALL_BUFFERS_FLUSHED;
     }
-    pthread_mutex_unlock(&ctx->shared->lock);
 
     int rc = v4l2_overlay_q_buf( ctx->ctl_fd, (int)buffer );
-    if (rc == 0 && ctx->qd_buf_count < ctx->num_buffers) {
+    if (rc) {
+        pthread_mutex_unlock(&ctx->shared->lock);
+        return rc;
+    }
+
+    if (ctx->qd_buf_count < ctx->num_buffers) {
         ctx->qd_buf_count ++;
     }
 
-    // Catch the case where the data side had no need to set the crop window
-    if (!ctx->shared->dataReady) {
+    if (ctx->shared->streamEn == 0) {
         ctx->shared->dataReady = 1;
-        enable_streaming(ctx->shared, ctx->ctl_fd);
+        enable_streaming_locked(ctx->shared, ctx->ctl_fd);
     }
+
+    pthread_mutex_unlock(&ctx->shared->lock);
 
     return rc;
 }

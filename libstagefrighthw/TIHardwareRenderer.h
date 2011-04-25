@@ -72,12 +72,11 @@ private:
     sp<Overlay> mOverlay;
     Vector<void *> mOverlayAddresses;
 #ifdef OVERLAY_SUPPORT_USERPTR_BUF
-    int nOverlayBuffersQueued;
     OverlayBufferData buffers_queued_to_dss[NUM_OVERLAY_BUFFERS_REQUESTED];
     release_rendered_buffer_callback release_frame_cb;
     void  *cookie;
 #endif
-    bool mIsFirstFrame;
+    int nOverlayBuffersQueued;
     size_t mIndex;
 
     TIHardwareRenderer(const TIHardwareRenderer &);
