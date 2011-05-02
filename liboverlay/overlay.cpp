@@ -454,13 +454,17 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
         goto error1;
     }
 
-    if (v4l2_overlay_set_crop(fd, 0, 0, w, h)) {
-        LOGE("Failed defaulting crop window\n");
+    /* Rotation MUST come prior all overlay operations.
+     * Set rotation to 90 now. Then we'll be able to
+     * change the angle runtime, otherwise DSS crashes.
+     */
+    if (v4l2_overlay_set_rotation(fd, 90, 0)) {
+        LOGE("Failed defaulting rotation\n");
         goto error1;
     }
 
-    if (v4l2_overlay_set_rotation(fd, 90, 0)) {
-        LOGE("Failed defaulting rotation\n");
+    if (v4l2_overlay_set_crop(fd, 0, 0, w, h)) {
+        LOGE("Failed defaulting crop window\n");
         goto error1;
     }
 
@@ -665,6 +669,7 @@ static int overlay_commit(struct overlay_control_device_t *dev,
 
     int ret = 0;
     int fd = obj->ctl_fd();
+    int t;
 
     if (shared == NULL) {
         LOGI("Shared Data Not Init'd!\n");
@@ -675,6 +680,12 @@ static int overlay_commit(struct overlay_control_device_t *dev,
 
     if (!shared->controlReady) {
         shared->controlReady = 1;
+    }
+
+    /*swap params when rotated*/
+    if (stage->rotation == 90 || stage->rotation == 270) {
+        t = stage->posX; stage->posX = stage->posY; stage->posY = t;
+        t = stage->posW; stage->posW = stage->posH; stage->posH = t;
     }
 
     if (data->posX == stage->posX && data->posY == stage->posY &&
