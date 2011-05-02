@@ -1111,10 +1111,13 @@ int overlay_queueBuffer(struct overlay_data_device_t *dev,
         rc = v4l2_overlay_q_buf_uptr( ctx->ctl_fd, buffer, ctx->buffers_len[0] );
     else
         rc = v4l2_overlay_q_buf( ctx->ctl_fd, (int)buffer );
-    if (rc == 0 && ctx->qd_buf_count < ctx->num_buffers) {
+    if (rc) {
+        pthread_mutex_unlock(&ctx->shared->lock);
+        return rc;
+    }
+
+    if (ctx->qd_buf_count < ctx->num_buffers) {
         ctx->qd_buf_count ++;
-    } else {
-        LOGE("queueBuffer failed [%d]", rc);
     }
 
     if (ctx->shared->streamEn == 0) {
