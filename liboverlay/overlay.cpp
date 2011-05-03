@@ -705,12 +705,24 @@ static int overlay_commit(struct overlay_control_device_t *dev,
         goto end;
 
     if (stage->rotation != data->rotation) {
+        uint32_t cropX, cropY, cropW, cropH;
+
+        if ((ret = v4l2_overlay_get_crop(fd, &cropX, &cropY, &cropW, &cropH))) {
+            LOGE("commit: Get crop value Failed!/%d", ret);
+            goto end;
+        }
+
         ret = v4l2_overlay_set_rotation(fd, stage->rotation, 0);
         if (ret) {
             LOGE("Set Rotation Failed!/%d\n", ret);
             goto end;
         }
         data->rotation = stage->rotation;
+
+        if ((ret = v4l2_overlay_set_crop(fd, cropX, cropY, cropW, cropH))) {
+            LOGE("commit: Set Cropping Failed!/%d",ret);
+            goto end;
+        }
     }
 
     if (!(stage->posX == data->posX && stage->posY == data->posY &&
