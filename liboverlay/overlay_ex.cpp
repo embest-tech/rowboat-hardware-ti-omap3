@@ -141,6 +141,8 @@ struct overlay_module_t HAL_MODULE_INFO_SYM = {
         name: "Sample Overlay module",
         author: "The Android Open Source Project",
         methods: &overlay_module_methods,
+        dso: NULL,      /* remove compilation warnings */
+        reserved: {0},  /* remove compilation warnings */
     }
 };
 
