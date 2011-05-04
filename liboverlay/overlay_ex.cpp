@@ -245,6 +245,83 @@ public:
 // Local Functions
 // ****************************************************************************
 
+static int sysfs_write(const char* pathname, const void* buf, size_t size)
+{
+    int fd = open(pathname, O_WRONLY);
+    if (fd == -1) {
+        LOGE("Can't open [%s]", pathname);
+        return -1;
+    }
+    size_t written_size = write(fd, buf, size);
+    if (written_size <= 0) {
+        LOGE("Can't write [%s]", pathname);
+        close(fd);
+        return -1;
+    }
+    close(fd);
+    return 0;
+}
+
+static int sysfs_read(const char* pathname, void* buf, size_t size)
+{
+    int fd = open(pathname, O_RDONLY);
+    if (fd == -1) {
+        LOGE("Can't open the file[%s]", pathname);
+        return -1;
+    }
+    size_t bytesread = read(fd, buf, size);
+    if ((int)bytesread < 0) {
+        LOGE("cant read from file[%s]", pathname);
+        close(fd);
+        return -1;
+    }
+    close(fd);
+    return bytesread;
+}
+
+/* find the first enabled display and return its resolution */
+static int get_display_resolution(uint32_t *w, uint32_t *h)
+{
+#define _N_DISPLAYS 3
+#define _BUFLEN     256
+
+    int fd, i;
+    char sysfs_path[_BUFLEN], buf[_BUFLEN];
+    size_t n;
+    uint32_t dummy;
+
+    if (!w || !h)
+        return -1;
+
+    for (i=0; i<_N_DISPLAYS; i++) {
+        sprintf(sysfs_path, "/sys/devices/platform/omapdss/display%d/enabled", i);
+        sysfs_read(sysfs_path, buf, _BUFLEN);
+        if (!strncmp(buf, "1", 1))
+            break;
+    }
+    if (i == _N_DISPLAYS) {
+        LOGE("no display enabled");
+        return -1;
+    }
+
+    sprintf(sysfs_path, "/sys/devices/platform/omapdss/display%d/name", i);
+    sysfs_read(sysfs_path, buf, _BUFLEN);
+    strtok(buf, "\n");
+
+    LOGD("found display %d [%s] enabled", i, buf);
+
+    sprintf(sysfs_path, "/sys/devices/platform/omapdss/display%d/timings", i);
+    sysfs_read(sysfs_path, buf, _BUFLEN);
+
+    if (sscanf(buf, "%u,%u/%u/%u/%u,%u/%u/%u/%u\n",
+               &dummy, w, &dummy, &dummy, &dummy, h, &dummy, &dummy, &dummy) != 9) {
+        LOGE("parsing gfx timing info failed");
+        return -1;
+    }
+
+    return 0;
+}
+
 static int create_shared_data(overlay_shared_t **shared)
 {
     int fd;
@@ -501,8 +578,13 @@ static overlay_t* overlay_createOverlay(struct overlay_control_device_t *dev,
    shared->controlReady = 0;
    shared->streamEn = 0;
    shared->streamingReset = 0;
-   shared->dispW = LCD_WIDTH; // Need to determine this properly
-   shared->dispH = LCD_HEIGHT; // Need to determine this properly
+
+    if (get_display_resolution(&shared->dispW, &shared->dispH)) {
+        shared->dispW = LCD_WIDTH;
+        shared->dispH = LCD_HEIGHT;
+        LOGW("Failed to get display resolution, use the default %dx%d",
+                shared->dispW, shared->dispH);
+    }
 
     LOGI("Opened video1/fd=%d/obj=%08lx/shm=%d/size=%d", fd,
         (unsigned long)overlay, shared_fd, shared->size);
