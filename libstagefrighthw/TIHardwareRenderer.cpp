@@ -268,7 +268,7 @@ void TIHardwareRenderer::render(
             if (release_frame_cb) {
                 release_frame_cb(buffers_queued_to_dss[mIndex].ptr, cookie);
             }
-        } else {
+        } else if (nOverlayBuffersQueued >= NUM_QUEUED_BUFFERS_OPTIMAL) {
             LOGE("Dequeue buffer failed");
         }
 
