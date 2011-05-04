@@ -284,7 +284,6 @@ void TIHardwareRenderer::render(
         nOverlayBuffersQueued = 0;
         if (mOverlay->queueBuffer((void *)mIndex) != 0) {
             LOGE("Queue buffer [%d] failed", mIndex);
-            return;
         }
     }
 
