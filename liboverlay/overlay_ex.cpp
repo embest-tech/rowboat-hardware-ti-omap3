@@ -803,9 +803,10 @@ static int overlay_commit(struct overlay_control_device_t *dev,
         t = stage->posW; stage->posW = stage->posH; stage->posH = t;
     }
 
+    /* If Rotation has changed but window has not changed yet, ignore this commit.
+     * SurfaceFlinger will set the right window parameters and call commit again. */
     if (data->posX == stage->posX && data->posY == stage->posY &&
-        data->posW == stage->posW && data->posH == stage->posH &&
-        data->rotation == stage->rotation) {
+        data->posW == stage->posW && data->posH == stage->posH) {
         LOGV("Nothing to do!\n");
         goto end;
     }
@@ -840,33 +841,31 @@ static int overlay_commit(struct overlay_control_device_t *dev,
         }
     }
 
-    if (stage->posX != data->posX || stage->posY != data->posY ||
-        stage->posW != data->posW || stage->posH != data->posH)
-    {
-        /*video resolution is bigger than video window, crop it*/
-        if (obj->w > stage->posW || obj->h > stage->posH) {
-            overlay_data_t c;
+    // stage->pos# != data->pos# if reach here
 
-            calc_crop_win(obj->w, obj->h, stage->posW, stage->posH, &c);
-            LOGD("set crop to x %d, y %d, %dx%d", c.cropX, c.cropY, c.cropW, c.cropH);
-            ret = v4l2_overlay_set_crop(fd, c.cropX, c.cropY, c.cropW, c.cropH);
-            if (ret) {
-                LOGE("commit: cropping failed/%d", ret);
-                goto end;
-            }
-        }
+    /*video resolution is bigger than video window, crop it*/
+    if (obj->w > stage->posW || obj->h > stage->posH) {
+        overlay_data_t c;
 
-        ret = v4l2_overlay_set_position(fd, stage->posX, stage->posY,
-                                    stage->posW, stage->posH);
+        calc_crop_win(obj->w, obj->h, stage->posW, stage->posH, &c);
+        LOGD("set crop to x %d, y %d, %dx%d", c.cropX, c.cropY, c.cropW, c.cropH);
+        ret = v4l2_overlay_set_crop(fd, c.cropX, c.cropY, c.cropW, c.cropH);
         if (ret) {
-            LOGE("Set Position Failed!/%d\n", ret);
+            LOGE("commit: cropping failed/%d", ret);
             goto end;
         }
-        data->posX = stage->posX;
-        data->posY = stage->posY;
-        data->posW = stage->posW;
-        data->posH = stage->posH;
     }
+
+    ret = v4l2_overlay_set_position(fd, stage->posX, stage->posY,
+                                stage->posW, stage->posH);
+    if (ret) {
+        LOGE("Set Position Failed!/%d\n", ret);
+        goto end;
+    }
+    data->posX = stage->posX;
+    data->posY = stage->posY;
+    data->posW = stage->posW;
+    data->posH = stage->posH;
 
     ret = enable_streaming_locked(shared, fd);
 
