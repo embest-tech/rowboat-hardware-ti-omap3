@@ -665,6 +665,29 @@ static int overlay_stage(struct overlay_control_device_t *dev,
     return 0;
 }
 
+static void calc_crop_win(uint32_t video_w, uint32_t video_h,
+                          uint32_t disp_w, uint32_t disp_h,
+                          overlay_data_t *c)
+{
+    if (!c) return;
+
+    if (video_w > disp_w) {
+        c->cropW = disp_w;
+        c->cropX = (video_w - disp_w) / 2;
+    } else {
+        c->cropW = video_w;
+        c->cropX = 0;
+    }
+
+    if (video_h > disp_h) {
+        c->cropH = disp_h;
+        c->cropY = (video_h - disp_h) / 2;
+    } else {
+        c->cropH = video_h;
+        c->cropY = 0;
+    }
+}
+
 static int overlay_commit(struct overlay_control_device_t *dev,
                           overlay_t* overlay) {
     LOG_FUNCTION_NAME;
@@ -733,10 +756,24 @@ static int overlay_commit(struct overlay_control_device_t *dev,
         }
     }
 
-    if (!(stage->posX == data->posX && stage->posY == data->posY &&
-        stage->posW == data->posW && stage->posH == data->posH)) {
+    if (stage->posX != data->posX || stage->posY != data->posY ||
+        stage->posW != data->posW || stage->posH != data->posH)
+    {
+        /*video resolution is bigger than video window, crop it*/
+        if (obj->w > stage->posW || obj->h > stage->posH) {
+            overlay_data_t c;
+
+            calc_crop_win(obj->w, obj->h, stage->posW, stage->posH, &c);
+            LOGD("set crop to x %d, y %d, %dx%d", c.cropX, c.cropY, c.cropW, c.cropH);
+            ret = v4l2_overlay_set_crop(fd, c.cropX, c.cropY, c.cropW, c.cropH);
+            if (ret) {
+                LOGE("commit: cropping failed/%d", ret);
+                goto end;
+            }
+        }
+
         ret = v4l2_overlay_set_position(fd, stage->posX, stage->posY,
-                                        stage->posW, stage->posH);
+                                    stage->posW, stage->posH);
         if (ret) {
             LOGE("Set Position Failed!/%d\n", ret);
             goto end;

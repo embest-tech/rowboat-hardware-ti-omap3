@@ -293,14 +293,14 @@ int v4l2_overlay_set_position(int fd, int32_t x, int32_t y, int32_t w, int32_t h
                              "get v4l2_overlay format");
     if (ret)
        return ret;
-    LOGI("v4l2_overlay_set_position:: w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
+    LOGI("v4l2_overlay_set_position:: original w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
    
     configure_window(&format.fmt.win, w, h, x, y);
 
     format.type = V4L2_BUF_TYPE_VIDEO_OVERLAY;
     ret = v4l2_overlay_ioctl(fd, VIDIOC_S_FMT, &format,
                              "set v4l2_overlay format");
-    LOGI("v4l2_overlay_set_position:: w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
+    LOGI("v4l2_overlay_set_position:: new w=%d h=%d", format.fmt.win.w.width, format.fmt.win.w.height);
     
     if (ret)
        return ret;
