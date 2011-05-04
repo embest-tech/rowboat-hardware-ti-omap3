@@ -93,42 +93,19 @@ int v4l2_overlay_open(int id)
 
 void dump_pixfmt(struct v4l2_pix_format *pix)
 {
-    LOGI("w: %d\n", pix->width);
-    LOGI("h: %d\n", pix->height);
-    LOGI("color: %x\n", pix->colorspace);
+    char *fmt;
+
     switch (pix->pixelformat) {
-        case V4L2_PIX_FMT_YUYV:
-            LOGI ("YUYV\n");
-            break;
-        case V4L2_PIX_FMT_UYVY:
-            LOGI ("UYVY\n");
-            break;
-        case V4L2_PIX_FMT_RGB565:
-            LOGI ("RGB565\n");
-            break;
-        case V4L2_PIX_FMT_RGB565X:
-            LOGI ("RGB565X\n");
-            break;
-        default:
-            LOGI("not supported\n");
+        case V4L2_PIX_FMT_YUYV: fmt = "YUYV"; break;
+        case V4L2_PIX_FMT_UYVY: fmt = "UYVY"; break;
+        case V4L2_PIX_FMT_RGB565: fmt = "RGB565"; break;
+        case V4L2_PIX_FMT_RGB565X: fmt = "RGB565X"; break;
+        default: fmt = "unsupported"; break;
     }
+    LOGI("output pixfmt: w %d, h %d, colorsapce %x, pixfmt %s",
+            pix->width, pix->height, pix->colorspace, fmt);
 }
 
-void dump_crop(struct v4l2_crop *crop)
-{
-    LOGI("crop l: %d ", crop->c.left);
-    LOGI("crop t: %d ", crop->c.top);
-    LOGI("crop w: %d ", crop->c.width);
-    LOGI("crop h: %d\n", crop->c.height);
-}
-
-void dump_window(struct v4l2_window *win)
-{
-    LOGI("window l: %d ", win->w.left);
-    LOGI("window t: %d ", win->w.top);
-    LOGI("window w: %d ", win->w.width);
-    LOGI("window h: %d\n", win->w.height);
-}
 void v4l2_overlay_dump_state(int fd)
 {
     struct v4l2_format format;
@@ -140,22 +117,22 @@ void v4l2_overlay_dump_state(int fd)
     ret = ioctl(fd, VIDIOC_G_FMT, &format);
     if (ret < 0)
         return;
-    LOGI("output pixfmt:\n");
     dump_pixfmt(&format.fmt.pix);
 
     format.type = V4L2_BUF_TYPE_VIDEO_OVERLAY;
     ret = ioctl(fd, VIDIOC_G_FMT, &format);
     if (ret < 0)
         return;
-    LOGI("v4l2_overlay window:\n");
-    dump_window(&format.fmt.win);
+    LOGI("v4l2_overlay window: l %d, t %d, w %d, h %d",
+         format.fmt.win.w.left, format.fmt.win.w.top,
+         format.fmt.win.w.width, format.fmt.win.w.height);
 
     crop.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
     ret = ioctl(fd, VIDIOC_G_CROP, &crop);
     if (ret < 0)
         return;
-    LOGI("output crop:\n");
-    dump_crop(&crop);
+    LOGI("output crop: l %d, t %d, w %d, h %d",
+         crop.c.left, crop.c.top, crop.c.width, crop.c.height);
 }
 
 static void error(int fd, const char *msg)
