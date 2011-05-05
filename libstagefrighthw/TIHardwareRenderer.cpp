@@ -212,42 +212,41 @@ void TIHardwareRenderer::render(
                 break;
         }
 
-        if (mIndex == NUM_OVERLAY_BUFFERS_REQUESTED) {
-            LOGE("DSS Queue is full");
-            release_frame_cb(data, cookie);
-            return;
-        }
+        if (mIndex < NUM_OVERLAY_BUFFERS_REQUESTED) {
+            int nBuffers_queued_to_dss = mOverlay->queueBuffer((void *)data);
 
-        int nBuffers_queued_to_dss = mOverlay->queueBuffer((void *)data);
-
-        if (nBuffers_queued_to_dss == ALL_BUFFERS_FLUSHED) {
-            nBuffers_queued_to_dss = mOverlay->queueBuffer((void *)data);
-        }
-
-        if (release_frame_cb) {
-            if (nBuffers_queued_to_dss < 0) {
-                LOGE("Queue buffer [%p] failed", data);
-                release_frame_cb(data, cookie);
+            if (nBuffers_queued_to_dss == ALL_BUFFERS_FLUSHED) {
+                nBuffers_queued_to_dss = mOverlay->queueBuffer((void *)data);
             }
-            else {
-                nOverlayBuffersQueued++;
-                buffers_queued_to_dss[mIndex].ptr = data;
-                buffers_queued_to_dss[mIndex].state = WRD_STATE_INDSSQUEUE;
 
-                if (nBuffers_queued_to_dss != nOverlayBuffersQueued) { // STREAM OFF occurred
-                    //Release all the buffers that were discarded by DSS upon STREAM OFF
-                    for (size_t idx = 0; idx < NUM_OVERLAY_BUFFERS_REQUESTED; idx++) {
-                        if (idx == mIndex)
-                            continue;
-                        if (buffers_queued_to_dss[idx].state == WRD_STATE_INDSSQUEUE) {
-                            nOverlayBuffersQueued--;
-                            buffers_queued_to_dss[idx].state = WRD_STATE_UNUSED;
-                            release_frame_cb(buffers_queued_to_dss[idx].ptr, cookie);
-                            LOGD("Reclaiming the buffer [%p] from Overlay", buffers_queued_to_dss[idx].ptr);
+            if (release_frame_cb) {
+                if (nBuffers_queued_to_dss < 0) {
+                    LOGE("Queue buffer [%p] failed", data);
+                    release_frame_cb(data, cookie);
+                }
+                else {
+                    nOverlayBuffersQueued++;
+                    buffers_queued_to_dss[mIndex].ptr = data;
+                    buffers_queued_to_dss[mIndex].state = WRD_STATE_INDSSQUEUE;
+
+                    if (nBuffers_queued_to_dss != nOverlayBuffersQueued) { // STREAM OFF occurred
+                        //Release all the buffers that were discarded by DSS upon STREAM OFF
+                        for (size_t idx = 0; idx < NUM_OVERLAY_BUFFERS_REQUESTED; idx++) {
+                            if (idx == mIndex)
+                                continue;
+                            if (buffers_queued_to_dss[idx].state == WRD_STATE_INDSSQUEUE) {
+                                nOverlayBuffersQueued--;
+                                buffers_queued_to_dss[idx].state = WRD_STATE_UNUSED;
+                                release_frame_cb(buffers_queued_to_dss[idx].ptr, cookie);
+                                LOGD("Reclaiming the buffer [%p] from Overlay", buffers_queued_to_dss[idx].ptr);
+                            }
                         }
                     }
                 }
             }
+        } else if (release_frame_cb) {
+            LOGW("DSS Queue is full");
+            release_frame_cb(data, cookie);
         }
 
         // dequeue the dsp buffer
