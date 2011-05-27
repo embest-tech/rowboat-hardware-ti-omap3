@@ -25,8 +25,8 @@
 #include <sys/mman.h>
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-
-#define VIDEO_DEVICE        "/dev/video0"
+#define VIDEO_DEVICE        "/dev/video2"
+#define MEDIA_DEVICE        "/dev/media0"
 #define PREVIEW_WIDTH        320
 #define PREVIEW_HEIGHT       240
 #define PIXEL_FORMAT        V4L2_PIX_FMT_YUYV
@@ -68,6 +68,7 @@ CameraHardware::CameraHardware()
 	/* create camera */
 	mCamera = new V4L2Camera();
 	mCamera->Open(VIDEO_DEVICE);
+	mCamera->Open_media_device(MEDIA_DEVICE);
 
 	initDefaultParameters();
 
@@ -252,7 +253,8 @@ status_t CameraHardware::startPreview()
         mCamera = new V4L2Camera();
     }
 
-    mCamera->Open(VIDEO_DEVICE);
+    if (mCamera->Open(VIDEO_DEVICE) < 0)
+	    return INVALID_OPERATION;
 
     Mutex::Autolock lock(mPreviewLock);
     if (mPreviewThread != 0) {

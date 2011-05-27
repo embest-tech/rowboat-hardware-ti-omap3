@@ -34,6 +34,15 @@
 extern "C" {
     #include <jpeglib.h>
 }
+#define MEDIA_DEVICE "/dev/media0"
+#define ENTITY_VIDEO_CCDC_OUT_NAME      "OMAP3 ISP CCDC output"
+#define ENTITY_CCDC_NAME                "OMAP3 ISP CCDC"
+#define ENTITY_TVP514X_NAME             "tvp514x 3-005c"
+#define ENTITY_MT9T111_NAME             "mt9t111 2-003c"
+#define ENTITY_MT9V113_NAME             "mt9v113 2-003c"
+#define IMG_WIDTH_VGA           640
+#define IMG_HEIGHT_VGA          480
+#define DEF_PIX_FMT             V4L2_PIX_FMT_UYVY
 
 #include "V4L2Camera.h"
 
@@ -43,7 +52,9 @@ V4L2Camera::V4L2Camera ()
     : nQueued(0), nDequeued(0)
 {
     videoIn = (struct vdIn *) calloc (1, sizeof (struct vdIn));
+    mediaIn = (struct mdIn *) calloc (1, sizeof (struct mdIn));
     camHandle = -1;
+    mediaIn->input_source=1;
 #ifdef _OMAP_RESIZER_
 	videoIn->resizeHandle = -1;
 #endif //_OMAP_RESIZER_
@@ -52,19 +63,67 @@ V4L2Camera::V4L2Camera ()
 V4L2Camera::~V4L2Camera()
 {
     free(videoIn);
+    free(mediaIn);
 }
 
 int V4L2Camera::Open(const char *device)
 {
 	int ret = 0;
+	int ccdc_fd, tvp_fd;
+	struct v4l2_subdev_format fmt;
+	char subdev[20];
 	LOG_FUNCTION_START
 
 	do
 	{
 		if ((camHandle = open(device, O_RDWR)) == -1) {
 			LOGE("ERROR opening V4L interface: %s", strerror(errno));
-			ret = -1;
-			break;
+			reset_links(MEDIA_DEVICE);
+			return -1;
+		}
+		ccdc_fd = open("/dev/v4l-subdev2", O_RDWR);
+		if(ccdc_fd == -1) {
+			LOGE("Error opening ccdc device");
+			close(camHandle);
+			reset_links(MEDIA_DEVICE);
+			return -1;
+		}
+		fmt.pad = 0;
+		fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+		fmt.format.code = V4L2_MBUS_FMT_UYVY8_2X8;
+		fmt.format.width = IMG_WIDTH_VGA;
+		fmt.format.height = IMG_HEIGHT_VGA;
+		fmt.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
+		fmt.format.field = V4L2_FIELD_INTERLACED;
+		ret = ioctl(ccdc_fd, VIDIOC_SUBDEV_S_FMT, &fmt);
+		if(ret < 0)
+		{
+			LOGE("Failed to set format on pad");
+		}
+		memset(&fmt, 0, sizeof(fmt));
+		fmt.pad = 1;
+		fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+		fmt.format.code = V4L2_MBUS_FMT_UYVY8_2X8;
+		fmt.format.width = IMG_WIDTH_VGA;
+		fmt.format.height = IMG_HEIGHT_VGA;
+		fmt.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
+		fmt.format.field = V4L2_FIELD_INTERLACED;
+		ret = ioctl(ccdc_fd, VIDIOC_SUBDEV_S_FMT, &fmt);
+		if(ret) {
+			LOGE("Failed to set format on pad");
+		}
+		mediaIn->input_source=1;
+		if (mediaIn->input_source != 0)
+			strcpy(subdev, "/dev/v4l-subdev8");
+		else
+			strcpy(subdev, "/dev/v4l-subdev9");
+		tvp_fd = open(subdev, O_RDWR);
+		if(tvp_fd == -1) {
+			LOGE("Failed to open subdev");
+			ret=-1;
+			close(camHandle);
+			reset_links(MEDIA_DEVICE);
+			return ret;
 		}
 
 		ret = ioctl (camHandle, VIDIOC_QUERYCAP, &videoIn->cap);
@@ -93,6 +152,129 @@ int V4L2Camera::Open(const char *device)
 	LOG_FUNCTION_EXIT
     return ret;
 }
+
+int V4L2Camera::Open_media_device(const char *device)
+{
+
+	int ret = 0;
+	int index = 0;
+	int i;
+	struct media_link_desc link;
+	struct media_links_enum links;
+	int input_v4l;
+
+	LOG_FUNCTION_START
+	/*opening the media device*/
+	mediaIn->media_fd = open(device, O_RDWR);
+	if(mediaIn->media_fd <= 0)
+	{
+		LOGE("ERROR opening media device: %s",strerror(errno));
+		return -1;
+	}
+	/*enumerate_all_entities*/
+	do {
+		mediaIn->entity[index].id = index | MEDIA_ENTITY_ID_FLAG_NEXT;
+		ret = ioctl(mediaIn->media_fd, MEDIA_IOC_ENUM_ENTITIES, &mediaIn->entity[index]);
+		if (ret < 0) {
+			break;
+		} else {
+			if (!strcmp(mediaIn->entity[index].name, ENTITY_VIDEO_CCDC_OUT_NAME))
+				mediaIn->video =  mediaIn->entity[index].id;
+			else if (!strcmp(mediaIn->entity[index].name, ENTITY_TVP514X_NAME))
+				mediaIn->tvp5146 =  mediaIn->entity[index].id;
+			else if (!strcmp(mediaIn->entity[index].name, ENTITY_MT9T111_NAME))
+			{
+				mediaIn->mt9t111 =  mediaIn->entity[index].id;
+				mediaIn->input_source=1;
+			}
+			else if (!strcmp(mediaIn->entity[index].name, ENTITY_CCDC_NAME))
+				mediaIn->ccdc =  mediaIn->entity[index].id;
+			else if (!strcmp(mediaIn->entity[index].name, ENTITY_MT9V113_NAME))
+			{
+				mediaIn->mt9v113 =  mediaIn->entity[index].id;
+				mediaIn->input_source=2;
+			}
+		}
+		index++;
+	}while(ret==0);
+
+	if ((ret < 0) && (index <= 0)) {
+		LOGE("Failed to enumerate entities ret val is %d",ret);
+		close(mediaIn->media_fd);
+		return -1;
+	}
+	mediaIn->num_entities = index;
+
+	/*setup_media_links*/
+	for(index = 0; index < mediaIn->num_entities; index++) {
+		links.entity = mediaIn->entity[index].id;
+		links.pads =(struct media_pad_desc *) malloc((sizeof( struct media_pad_desc)) * (mediaIn->entity[index].pads));
+		links.links = (struct media_link_desc *) malloc((sizeof(struct media_link_desc)) * mediaIn->entity[index].links);
+		ret = ioctl(mediaIn->media_fd, MEDIA_IOC_ENUM_LINKS, &links);
+		if (ret < 0) {
+			LOGE("ERROR  while enumerating links/pads");
+			break;
+		}
+		else {
+			if(mediaIn->entity[index].pads)
+				LOGD("pads for entity %d=", mediaIn->entity[index].id);
+				for(i = 0 ; i < mediaIn->entity[index].pads; i++) {
+					LOGD("(%d %s) ", links.pads->index,(links.pads->flags & MEDIA_PAD_FLAG_INPUT) ?"INPUT" : "OUTPUT");
+					links.pads++;
+				}
+			for(i = 0; i < mediaIn->entity[index].links; i++) {
+				LOGD("[%d:%d]===>[%d:%d]",links.links->source.entity,links.links->source.index,links.links->sink.entity,links.links->sink.index);
+				if(links.links->flags & MEDIA_LINK_FLAG_ENABLED)
+					LOGD("\tACTIVE\n");
+				else
+					LOGD("\tINACTIVE \n");
+				links.links++;
+			}
+		}
+	}
+	if (mediaIn->input_source == 1)
+		input_v4l = mediaIn->mt9t111;
+	else if (mediaIn->input_source == 2)
+		input_v4l = mediaIn->mt9v113;
+	else
+		input_v4l = mediaIn->tvp5146;
+
+	memset(&link, 0, sizeof(link));
+	link.flags |=  MEDIA_LINK_FLAG_ENABLED;
+	link.source.entity = input_v4l;
+	link.source.index = 0;
+
+	link.source.flags = MEDIA_PAD_FLAG_OUTPUT;
+	link.sink.entity = mediaIn->ccdc;
+	link.sink.index = 0;
+	link.sink.flags = MEDIA_PAD_FLAG_INPUT;
+
+	ret = ioctl(mediaIn->media_fd, MEDIA_IOC_SETUP_LINK, &link);
+	if(ret) {
+		LOGE("Failed to enable link bewteen entities");
+		close(mediaIn->media_fd);
+		return -1;
+	}
+	memset(&link, 0, sizeof(link));
+	link.flags |=  MEDIA_LINK_FLAG_ENABLED;
+	link.source.entity = mediaIn->ccdc;
+	link.source.index = 1;
+	link.source.flags = MEDIA_PAD_FLAG_OUTPUT;
+	link.sink.entity = mediaIn->video;
+	link.sink.index = 0;
+	link.sink.flags = MEDIA_PAD_FLAG_INPUT;
+	ret = ioctl(mediaIn->media_fd, MEDIA_IOC_SETUP_LINK, &link);
+	if(ret){
+		LOGE("Failed to enable link");
+
+		close(mediaIn->media_fd);
+		return -1;
+	}
+	/*close media device*/
+	close(mediaIn->media_fd);
+	LOG_FUNCTION_EXIT
+		return 0;
+}
 int V4L2Camera::Configure(int width,int height,int pixelformat,int fps)
 {
 	int ret = 0;
@@ -100,15 +282,15 @@ int V4L2Camera::Configure(int width,int height,int pixelformat,int fps)
 
 	struct v4l2_streamparm parm;
 
-    videoIn->width = width;
-    videoIn->height = height;
-    videoIn->framesizeIn = (width * height << 1);
-    videoIn->formatIn = pixelformat;
+    videoIn->width = IMG_WIDTH_VGA;
+    videoIn->height = IMG_HEIGHT_VGA;
+    videoIn->framesizeIn =((IMG_WIDTH_VGA * IMG_HEIGHT_VGA) << 1);
+    videoIn->formatIn = DEF_PIX_FMT;
 
     videoIn->format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    videoIn->format.fmt.pix.width = width;
-    videoIn->format.fmt.pix.height = height;
-    videoIn->format.fmt.pix.pixelformat = pixelformat;
+    videoIn->format.fmt.pix.width =IMG_WIDTH_VGA;
+    videoIn->format.fmt.pix.height =IMG_HEIGHT_VGA;
+    videoIn->format.fmt.pix.pixelformat = DEF_PIX_FMT;
 
 	do
 	{
@@ -119,23 +301,6 @@ int V4L2Camera::Configure(int width,int height,int pixelformat,int fps)
 		}
 		LOGD("CameraConfigure PreviewFormat: w=%d h=%d", videoIn->format.fmt.pix.width, videoIn->format.fmt.pix.height);
 
-		parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-		ret = ioctl(camHandle, VIDIOC_G_PARM, &parm);
-		if(ret != 0) {
-		   LOGD("VIDIOC_G_PARM ");
-		   break;
-		}
-
-		LOGD("CameraConfigure: Old frame rate is %d/%d  fps",
-			parm.parm.capture.timeperframe.denominator,
-			parm.parm.capture.timeperframe.numerator);
-
-		ret = ioctl(camHandle, VIDIOC_S_PARM, &parm);
-		if(ret != 0) {
-			LOGE("VIDIOC_S_PARM  Fail....");
-			ret = -1;
-			break;
-		}
 	}while(0);
 
     LOG_FUNCTION_EXIT
@@ -193,6 +358,42 @@ int V4L2Camera::BufferMap()
 
     LOG_FUNCTION_EXIT
     return 0;
+}
+void V4L2Camera::reset_links(const char *device)
+{
+	struct media_link_desc link;
+	struct media_links_enum links;
+	int ret, index, i;
+	/*reset the media links*/
+    mediaIn->media_fd= open(device, O_RDWR);
+    for(index = 0; index < mediaIn->num_entities; index++)
+    {
+	links.entity = mediaIn->entity[index].id;
+	links.pads = (struct media_pad_desc *)malloc(sizeof( struct media_pad_desc) * mediaIn->entity[index].pads);
+	links.links = (struct media_link_desc *)malloc(sizeof(struct media_link_desc) * mediaIn->entity[index].links);
+	ret = ioctl(mediaIn->media_fd, MEDIA_IOC_ENUM_LINKS, &links);
+	if (ret < 0) {
+		LOGD("Error while enumeration links/pads - %d\n", ret);
+		break;
+	}
+	else {
+	   LOGD("Inside else");
+		for(i = 0; i < mediaIn->entity[index].links; i++) {
+			link.source.entity = links.links->source.entity;
+			link.source.index = links.links->source.index;
+			link.source.flags = MEDIA_PAD_FLAG_OUTPUT;
+			link.sink.entity = links.links->sink.entity;
+			link.sink.index = links.links->sink.index;
+			link.sink.flags = MEDIA_PAD_FLAG_INPUT;
+			link.flags = (link.flags & ~MEDIA_LINK_FLAG_ENABLED) | (link.flags & MEDIA_LINK_FLAG_IMMUTABLE);
+			ret = ioctl(mediaIn->media_fd, MEDIA_IOC_SETUP_LINK, &link);
+			if(ret)
+				break;
+			links.links++;
+		}
+	}
+     }
+     close (mediaIn->media_fd);
 }
 
 void V4L2Camera::Close ()
@@ -534,12 +735,12 @@ int V4L2Camera::saveYUYVtoJPEG (unsigned char *inputBuffer, int width, int heigh
             int y, u, v;
 
             if (!z)
-                y = yuyv[0] << 8;
+                y = yuyv[1] << 8;
             else
-                y = yuyv[2] << 8;
+                y = yuyv[3] << 8;
 
-            u = yuyv[1] - 128;
-            v = yuyv[3] - 128;
+            u = yuyv[0] - 128;
+            v = yuyv[2] - 128;
 
             r = (y + (359 * v)) >> 8;
             g = (y - (88 * u) - (183 * v)) >> 8;
@@ -601,11 +802,10 @@ void V4L2Camera::convert(unsigned char *buf, unsigned char *rgb, int width, int 
 
     for (y = 0; y < blocks; y+=4) {
         unsigned char Y1, Y2, U, V;
-
-        Y1 = buf[y + 0];
-        U = buf[y + 1];
-        Y2 = buf[y + 2];
-        V = buf[y + 3];
+        U = buf[y + 0];
+        Y1 = buf[y + 1];
+        V = buf[y + 2];
+        Y2 = buf[y + 3];
 
         yuv_to_rgb16(Y1, U, V, &rgb[y]);
         yuv_to_rgb16(Y2, U, V, &rgb[y + 2]);

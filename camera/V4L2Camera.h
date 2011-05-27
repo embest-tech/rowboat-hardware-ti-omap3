@@ -27,10 +27,15 @@
 #include <linux/videodev.h>
 #include <utils/Log.h>
 
+
+#include <linux/media.h>
+#include <linux/v4l2-mediabus.h>
+#include <linux/v4l2-subdev.h>
+#include <linux/videodev2.h>
 #define LOG_FUNCTION_START    LOGD("%d: %s() ENTER", __LINE__, __FUNCTION__);
 #define LOG_FUNCTION_EXIT    LOGD("%d: %s() EXIT", __LINE__, __FUNCTION__);
 
-#define _OMAP_RESIZER_ 1
+#define _OMAP_RESIZER_ 0
 
 #ifdef _OMAP_RESIZER_
 #include "saResize.h"
@@ -53,6 +58,17 @@ struct vdIn {
 	int resizeHandle;
 #endif //_OMAP_RESIZER_
 };
+struct mdIn {
+	int media_fd;
+	int input_source;
+	struct media_entity_desc entity[20];
+	int video;
+	int ccdc;
+	int tvp5146;
+	int mt9t111;
+	int mt9v113;
+	unsigned int num_entities;
+};
 
 class V4L2Camera {
 
@@ -63,6 +79,8 @@ public:
     int Open (const char *device);
     int Configure(int width,int height,int pixelformat,int fps);
     void Close ();
+    void reset_links(const char *device);
+    int Open_media_device(const char *device);
 
     int BufferMap ();
     int init_parm();
@@ -80,6 +98,7 @@ public:
 
 private:
     struct vdIn *videoIn;
+    struct mdIn *mediaIn;
     int camHandle;
 
     int nQueued;
