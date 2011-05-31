@@ -124,6 +124,7 @@ static alsa_handle_t _defaults[] = {
         sampleRate  : DEFAULT_SAMPLE_RATE, // should ideally be 8000
         latency     : 200000, // Desired Delay in usec
         bufferSize  : DEFAULT_SAMPLE_RATE / 5, // Desired Number of samples
+		mmap		:0,
         modPrivate  : (void *)&setScoControls,
     },
     {
@@ -137,6 +138,7 @@ static alsa_handle_t _defaults[] = {
         sampleRate  : DEFAULT_SAMPLE_RATE,
         latency     : 200000, // Desired Delay in usec
         bufferSize  : DEFAULT_SAMPLE_RATE / 11, // Desired Number of samples
+		mmap		:0,
         modPrivate  : (void *)&setDefaultControls,
     },
     {
@@ -150,6 +152,7 @@ static alsa_handle_t _defaults[] = {
         sampleRate  : AudioRecord::DEFAULT_SAMPLE_RATE,
         latency     : 250000, // Desired Delay in usec
         bufferSize  : 2048, // Desired Number of samples
+		mmap		:0,
         modPrivate  : (void *)&setScoControls,
     },
     {
@@ -163,6 +166,7 @@ static alsa_handle_t _defaults[] = {
         sampleRate  : AudioRecord::DEFAULT_SAMPLE_RATE,
         latency     : 250000, // Desired Delay in usec
         bufferSize  : 2048, // Desired Number of samples
+		mmap		:0,
         modPrivate  : (void *)&setDefaultControls,
     },
 };
