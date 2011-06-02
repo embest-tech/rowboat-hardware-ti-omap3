@@ -28,9 +28,9 @@
 #include <utils/Log.h>
 
 
-#include <linux/media.h>
-#include <linux/v4l2-mediabus.h>
-#include <linux/v4l2-subdev.h>
+#include "media.h"
+#include "v4l2-mediabus.h"
+#include "v4l2-subdev.h"
 #include <linux/videodev2.h>
 #define LOG_FUNCTION_START    LOGD("%d: %s() ENTER", __LINE__, __FUNCTION__);
 #define LOG_FUNCTION_EXIT    LOGD("%d: %s() EXIT", __LINE__, __FUNCTION__);
