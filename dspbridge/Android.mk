@@ -13,4 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+ifdef HARDWARE_OMX
 include $(all-subdir-makefiles)
+endif
