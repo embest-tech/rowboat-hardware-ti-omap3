@@ -85,7 +85,12 @@ int v4l2_overlay_open(int id)
     LOG_FUNCTION_NAME
 
     if (id == V4L2_OVERLAY_PLANE_VIDEO1)
+#ifdef CONFIG_OMAP3530
+        return open("/dev/video7", O_RDWR);
+#else
         return open("/dev/video1", O_RDWR);
+#endif
+
     else if (id == V4L2_OVERLAY_PLANE_VIDEO2)
         return open("/dev/video2", O_RDWR);
     return -EINVAL;
