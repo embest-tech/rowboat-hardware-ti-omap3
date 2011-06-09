@@ -444,11 +444,12 @@ LOGV("%s", __FUNCTION__);
     /* for output devices */
     if (devices & 0x0000FFFF){
         if (devices & AudioSystem::DEVICE_OUT_SPEAKER) {
-            control.set("HeadsetR Mixer AudioR2", 1); // on
-            control.set("HeadsetL Mixer AudioL2", 1); // on
+            control.set("HeadsetR Mixer AudioR1", 1); // on
+            control.set("HeadsetL Mixer AudioL1", 1); // on
+            control.set("Headset Playback Volume", 1); //Headset Volume
         } else {
-            control.set("HeadsetR Mixer AudioR2", (unsigned int)0); // off
-            control.set("HeadsetL Mixer AudioL2", (unsigned int)0); // off
+            control.set("HeadsetR Mixer AudioR1", (unsigned int)0); // off
+            control.set("HeadsetL Mixer AudioL1", (unsigned int)0); // off
         }
     }
 
@@ -457,13 +458,10 @@ LOGV("%s", __FUNCTION__);
         if (devices & AudioSystem::DEVICE_IN_BUILTIN_MIC) {
 	    control.set("Analog Left AUXL Capture Switch", 1); //on
 	    control.set("Analog Right AUXR Capture Switch", 1); //on
-	    control.set("Analog Left Main Mic Capture Switch", 1); //on
-	    control.set("Analog Right Sub Mic Capture Switch", 1); //on
+	    control.set("Analog Capture Volume", (unsigned int)0); //Capture volume '0' to capture less noice
         } else {
 	    control.set("Analog Left AUXL Capture Switch", (unsigned int)0); //off
 	    control.set("Analog Right AUXR Capture Switch", (unsigned int)0); //off
-            control.set("Analog Left Main Mic Capture Switch", (unsigned int)0); // off
-            control.set("Analog Right Sub Mic Capture Switch", (unsigned int)0); // off
         }
     }
 }
