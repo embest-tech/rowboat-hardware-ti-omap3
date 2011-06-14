@@ -470,6 +470,10 @@ static int disable_streaming_locked(overlay_shared_t *shared, int ovly_fd)
         } else {
             shared->streamingReset = 1;
             shared->streamEn = 0;
+	    //Fix for AM37x overlay failure while dequeing
+	    //stream on should happen only after enqueuing the buffer,
+	    //So disable streaming should reset this flag so that stream on happens only after enqueue
+            shared->dataReady = 0;
         }
     }
 
