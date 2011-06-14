@@ -25,17 +25,24 @@
 #include <sys/mman.h>
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#define VIDEO_DEVICE        "/dev/video2"
+#define VIDEO_DEVICE_2        "/dev/video2"
+#define VIDEO_DEVICE_0        "/dev/video0"
 #define MEDIA_DEVICE        "/dev/media0"
 #define PREVIEW_WIDTH        320
 #define PREVIEW_HEIGHT       240
 #define PIXEL_FORMAT        V4L2_PIX_FMT_YUYV
+
+#ifndef KERNEL_VERSION
+#define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
+#endif
+#define MAX_STR_LEN 35
 
 #include <cutils/properties.h>
 #ifndef UNLIKELY
 #define UNLIKELY(exp) (__builtin_expect( (exp) != 0, false ))
 #endif
 static int mDebugFps = 0;
+int version=0;
 namespace android {
 
 /* 29/12/10 : preview/picture size validation logic */
@@ -67,8 +74,18 @@ CameraHardware::CameraHardware()
 
 	/* create camera */
 	mCamera = new V4L2Camera();
-	mCamera->Open(VIDEO_DEVICE);
-	mCamera->Open_media_device(MEDIA_DEVICE);
+	version = get_kernel_version();
+	if(version <= 0)
+		LOGE("Failed to parse kernel version\n");
+	if(version >= KERNEL_VERSION(2,6,37))
+	{
+		mCamera->Open(VIDEO_DEVICE_2);
+		mCamera->Open_media_device(MEDIA_DEVICE);
+	}
+	else
+	{
+		mCamera->Open(VIDEO_DEVICE_0);
+	}
 
 	initDefaultParameters();
 
@@ -105,6 +122,47 @@ void CameraHardware::initDefaultParameters()
     }
     LOG_FUNCTION_EXIT
     return;
+}
+int CameraHardware::get_kernel_version()
+{
+	char *verstring, *dummy;
+	int fd;
+	int major,minor,rev,ver=-1;
+	if ((verstring = (char *) malloc(MAX_STR_LEN)) == NULL )
+	{
+		LOGE("Failed to allocate memory\n");
+		return -1;
+	}
+	if ((dummy = (char *) malloc(MAX_STR_LEN)) == NULL )
+	{
+		LOGE("Failed to allocate memory\n");
+		free (verstring);
+		return -1;
+	}
+
+	if ((fd = open("/proc/version", O_RDONLY)) < 0)
+	{
+		LOGE("Failed to open file /proc/version\n");
+		goto ret;
+	}
+
+	if (read(fd, verstring, MAX_STR_LEN) < 0)
+	{
+		LOGE("Failed to read kernel version string from /proc/version file\n");
+		close(fd);
+		goto ret;
+	}
+	close(fd);
+	if (sscanf(verstring, "%s %s %d.%d.%d%s\n", dummy, dummy, &major, &minor, &rev, dummy) != 6)
+	{
+		LOGE("Failed to read kernel version numbers\n");
+		goto ret;
+	}
+	ver = KERNEL_VERSION(major, minor, rev);
+ret:
+	free(verstring);
+	free(dummy);
+	return ver;
 }
 
 CameraHardware::~CameraHardware()
@@ -252,10 +310,16 @@ status_t CameraHardware::startPreview()
         delete mCamera;
         mCamera = new V4L2Camera();
     }
-
-    if (mCamera->Open(VIDEO_DEVICE) < 0)
-	    return INVALID_OPERATION;
-
+	if(version >= KERNEL_VERSION(2,6,37))
+	{
+		if (mCamera->Open(VIDEO_DEVICE_2) < 0)
+		return INVALID_OPERATION;
+	}
+	else
+	{
+		if (mCamera->Open(VIDEO_DEVICE_0) < 0)
+		return INVALID_OPERATION;
+	}
     Mutex::Autolock lock(mPreviewLock);
     if (mPreviewThread != 0) {
         return INVALID_OPERATION;

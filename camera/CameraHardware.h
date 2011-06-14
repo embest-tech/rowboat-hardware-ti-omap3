@@ -102,6 +102,7 @@ private:
     };
 
     void initDefaultParameters();
+	int get_kernel_version();
 
     int previewThread();
 	/* validating supported size */

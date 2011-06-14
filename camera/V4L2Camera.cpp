@@ -30,6 +30,7 @@
 #include <sys/select.h>
 
 #include <linux/videodev.h>
+extern int version;
 
 extern "C" {
     #include <jpeglib.h>
@@ -53,8 +54,8 @@ V4L2Camera::V4L2Camera ()
 {
     videoIn = (struct vdIn *) calloc (1, sizeof (struct vdIn));
     mediaIn = (struct mdIn *) calloc (1, sizeof (struct mdIn));
-    camHandle = -1;
     mediaIn->input_source=1;
+    camHandle = -1;
 #ifdef _OMAP_RESIZER_
 	videoIn->resizeHandle = -1;
 #endif //_OMAP_RESIZER_
@@ -64,6 +65,7 @@ V4L2Camera::~V4L2Camera()
 {
     free(videoIn);
     free(mediaIn);
+
 }
 
 int V4L2Camera::Open(const char *device)
@@ -73,57 +75,60 @@ int V4L2Camera::Open(const char *device)
 	struct v4l2_subdev_format fmt;
 	char subdev[20];
 	LOG_FUNCTION_START
-
 	do
 	{
 		if ((camHandle = open(device, O_RDWR)) == -1) {
 			LOGE("ERROR opening V4L interface: %s", strerror(errno));
-			reset_links(MEDIA_DEVICE);
+			if(version >= KERNEL_VERSION(2,6,37));
+				reset_links(MEDIA_DEVICE);
 			return -1;
 		}
-		ccdc_fd = open("/dev/v4l-subdev2", O_RDWR);
-		if(ccdc_fd == -1) {
-			LOGE("Error opening ccdc device");
-			close(camHandle);
-			reset_links(MEDIA_DEVICE);
-			return -1;
-		}
-		fmt.pad = 0;
-		fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-		fmt.format.code = V4L2_MBUS_FMT_UYVY8_2X8;
-		fmt.format.width = IMG_WIDTH_VGA;
-		fmt.format.height = IMG_HEIGHT_VGA;
-		fmt.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
-		fmt.format.field = V4L2_FIELD_INTERLACED;
-		ret = ioctl(ccdc_fd, VIDIOC_SUBDEV_S_FMT, &fmt);
-		if(ret < 0)
+		if(version >= KERNEL_VERSION(2,6,37))
 		{
-			LOGE("Failed to set format on pad");
-		}
-		memset(&fmt, 0, sizeof(fmt));
-		fmt.pad = 1;
-		fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-		fmt.format.code = V4L2_MBUS_FMT_UYVY8_2X8;
-		fmt.format.width = IMG_WIDTH_VGA;
-		fmt.format.height = IMG_HEIGHT_VGA;
-		fmt.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
-		fmt.format.field = V4L2_FIELD_INTERLACED;
-		ret = ioctl(ccdc_fd, VIDIOC_SUBDEV_S_FMT, &fmt);
-		if(ret) {
-			LOGE("Failed to set format on pad");
-		}
-		mediaIn->input_source=1;
-		if (mediaIn->input_source != 0)
-			strcpy(subdev, "/dev/v4l-subdev8");
-		else
-			strcpy(subdev, "/dev/v4l-subdev9");
-		tvp_fd = open(subdev, O_RDWR);
-		if(tvp_fd == -1) {
-			LOGE("Failed to open subdev");
-			ret=-1;
-			close(camHandle);
-			reset_links(MEDIA_DEVICE);
-			return ret;
+			ccdc_fd = open("/dev/v4l-subdev2", O_RDWR);
+			if(ccdc_fd == -1) {
+				LOGE("Error opening ccdc device");
+				close(camHandle);
+				reset_links(MEDIA_DEVICE);
+				return -1;
+			}
+			fmt.pad = 0;
+			fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+			fmt.format.code = V4L2_MBUS_FMT_UYVY8_2X8;
+			fmt.format.width = IMG_WIDTH_VGA;
+			fmt.format.height = IMG_HEIGHT_VGA;
+			fmt.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
+			fmt.format.field = V4L2_FIELD_INTERLACED;
+			ret = ioctl(ccdc_fd, VIDIOC_SUBDEV_S_FMT, &fmt);
+			if(ret < 0)
+			{
+				LOGE("Failed to set format on pad");
+			}
+			memset(&fmt, 0, sizeof(fmt));
+			fmt.pad = 1;
+			fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+			fmt.format.code = V4L2_MBUS_FMT_UYVY8_2X8;
+			fmt.format.width = IMG_WIDTH_VGA;
+			fmt.format.height = IMG_HEIGHT_VGA;
+			fmt.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
+			fmt.format.field = V4L2_FIELD_INTERLACED;
+			ret = ioctl(ccdc_fd, VIDIOC_SUBDEV_S_FMT, &fmt);
+			if(ret) {
+				LOGE("Failed to set format on pad");
+			}
+			mediaIn->input_source=1;
+			if (mediaIn->input_source != 0)
+				strcpy(subdev, "/dev/v4l-subdev8");
+			else
+				strcpy(subdev, "/dev/v4l-subdev9");
+			tvp_fd = open(subdev, O_RDWR);
+			if(tvp_fd == -1) {
+				LOGE("Failed to open subdev");
+				ret=-1;
+				close(camHandle);
+				reset_links(MEDIA_DEVICE);
+				return ret;
+			}
 		}
 
 		ret = ioctl (camHandle, VIDIOC_QUERYCAP, &videoIn->cap);
@@ -281,17 +286,28 @@ int V4L2Camera::Configure(int width,int height,int pixelformat,int fps)
 	LOG_FUNCTION_START
 
 	struct v4l2_streamparm parm;
+	if(version >= KERNEL_VERSION(2,6,37))
+	{
+		videoIn->width = IMG_WIDTH_VGA;
+		videoIn->height = IMG_HEIGHT_VGA;
+		videoIn->framesizeIn =((IMG_WIDTH_VGA * IMG_HEIGHT_VGA) << 1);
+		videoIn->formatIn = DEF_PIX_FMT;
 
-    videoIn->width = IMG_WIDTH_VGA;
-    videoIn->height = IMG_HEIGHT_VGA;
-    videoIn->framesizeIn =((IMG_WIDTH_VGA * IMG_HEIGHT_VGA) << 1);
-    videoIn->formatIn = DEF_PIX_FMT;
-
+		videoIn->format.fmt.pix.width =IMG_WIDTH_VGA;
+		videoIn->format.fmt.pix.height =IMG_HEIGHT_VGA;
+		videoIn->format.fmt.pix.pixelformat = DEF_PIX_FMT;
+	}
+	else
+	{
+		videoIn->width = width;
+		videoIn->height = height;
+		videoIn->framesizeIn =((width * height) << 1);
+		videoIn->formatIn = pixelformat;
+		videoIn->format.fmt.pix.width =width;
+		videoIn->format.fmt.pix.height =height;
+		videoIn->format.fmt.pix.pixelformat = pixelformat;
+	}
     videoIn->format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    videoIn->format.fmt.pix.width =IMG_WIDTH_VGA;
-    videoIn->format.fmt.pix.height =IMG_HEIGHT_VGA;
-    videoIn->format.fmt.pix.pixelformat = DEF_PIX_FMT;
-
 	do
 	{
 		ret = ioctl(camHandle, VIDIOC_S_FMT, &videoIn->format);
@@ -734,14 +750,26 @@ int V4L2Camera::saveYUYVtoJPEG (unsigned char *inputBuffer, int width, int heigh
             int r, g, b;
             int y, u, v;
 
-            if (!z)
-                y = yuyv[1] << 8;
-            else
-                y = yuyv[3] << 8;
+			if(version >= KERNEL_VERSION(2,6,37))
+			{
+				if (!z)
+					y = yuyv[1] << 8;
+				else
+					y = yuyv[3] << 8;
 
-            u = yuyv[0] - 128;
-            v = yuyv[2] - 128;
+				u = yuyv[0] - 128;
+				v = yuyv[2] - 128;
+			}
+			else
+			{
+				if (!z)
+					y = yuyv[0] << 8;
+				else
+				y = yuyv[2] << 8;
 
+				u = yuyv[1] - 128;
+				v = yuyv[3] - 128;
+			}
             r = (y + (359 * v)) >> 8;
             g = (y - (88 * u) - (183 * v)) >> 8;
             b = (y + (454 * u)) >> 8;
@@ -802,10 +830,21 @@ void V4L2Camera::convert(unsigned char *buf, unsigned char *rgb, int width, int 
 
     for (y = 0; y < blocks; y+=4) {
         unsigned char Y1, Y2, U, V;
-        U = buf[y + 0];
-        Y1 = buf[y + 1];
-        V = buf[y + 2];
-        Y2 = buf[y + 3];
+		if(version >= KERNEL_VERSION(2,6,37))
+		{
+			U = buf[y + 0];
+			Y1 = buf[y + 1];
+			V = buf[y + 2];
+			Y2 = buf[y + 3];
+		}
+		else
+		{
+			Y1 = buf[y + 0];
+			U = buf[y + 1];
+			Y2 = buf[y + 2];
+			V = buf[y + 3];
+		}
+
 
         yuv_to_rgb16(Y1, U, V, &rgb[y]);
         yuv_to_rgb16(Y2, U, V, &rgb[y + 2]);
