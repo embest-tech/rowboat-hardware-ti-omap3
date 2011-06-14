@@ -17,13 +17,12 @@ LOCAL_PATH:= $(call my-dir)
 # hw/<COPYPIX_HARDWARE_MODULE_ID>.<ro.product.board>.so
 
 include $(CLEAR_VARS)
-ifeq (TARGET_PRODUCT, "omap3evm")
-CFLAGS += -DCONFIG_OMAP3530 
+ifeq ($(TARGET_PRODUCT), omap3evm)
+LOCAL_CFLAGS += -DCONFIG_OMAP3530
 endif
-ifeq (TARGET_PRODUCT, "beagleboard")
-CFLAGS += -DCONFIG_OMAP3530 
+ifeq ($(TARGET_PRODUCT), beagleboard)
+LOCAL_CFLAGS += -DCONFIG_OMAP3530
 endif
-
 LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 LOCAL_SHARED_LIBRARIES := liblog libcutils

@@ -26,6 +26,11 @@
 #include <sys/mman.h>
 #include "v4l2_utils.h"
 
+#ifndef KERNEL_VERSION
+#define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
+#endif
+#define MAX_STR_LEN 35
+
 #define LOG_FUNCTION_NAME    LOGV("%s: %s",  __FILE__, __FUNCTION__);
 
 #ifndef LOGE
@@ -80,20 +85,78 @@ int v4l2_overlay_get(int name) {
     return result;
 }
 
+/* return kernel version code by parsing /proc/version,
+   return <= 0 if error happens */
+int get_kernel_version()
+{
+	char *verstring, *dummy;
+	int fd;
+	int major,minor,rev,ver=-1;
+	if ((verstring = (char *) malloc(MAX_STR_LEN)) == NULL )
+	{
+		LOGE("Failed to allocate memory\n");
+		return -1;
+	}
+	if ((dummy = (char *) malloc(MAX_STR_LEN)) == NULL )
+	{
+		LOGE("Failed to allocate memory\n");
+		free (verstring);
+		return -1;
+	}
+
+	if ((fd = open("/proc/version", O_RDONLY)) < 0)
+	{
+		LOGE("Failed to open file /proc/version\n");
+		goto ret;
+	}
+	if (read(fd, verstring, MAX_STR_LEN) < 0)
+	{
+		LOGE("Failed to read kernel version string from /proc/version file\n");
+		close(fd);
+		goto ret;
+	}
+	close(fd);
+	if (sscanf(verstring, "%s %s %d.%d.%d%s\n", dummy, dummy, &major, &minor, &rev, dummy) != 6)
+	{
+			LOGE("Failed to read kernel version numbers\n");
+	        goto ret;
+	}
+	ver = KERNEL_VERSION(major, minor, rev);
+
+ret:
+	free(verstring);
+	free(dummy);
+
+	return ver;
+}
+
 int v4l2_overlay_open(int id)
 {
     LOG_FUNCTION_NAME
 
-    if (id == V4L2_OVERLAY_PLANE_VIDEO1)
-#ifdef CONFIG_OMAP3530
-        return open("/dev/video7", O_RDWR);
-#else
-        return open("/dev/video1", O_RDWR);
-#endif
+	int ver = get_kernel_version();
+	if(ver <= 0)
+	{
+		LOGE("Failed to parse kernel version\n");
+		return -1;
+	}
 
-    else if (id == V4L2_OVERLAY_PLANE_VIDEO2)
-        return open("/dev/video2", O_RDWR);
-    return -EINVAL;
+	if (id == V4L2_OVERLAY_PLANE_VIDEO1)
+	{
+		if(ver >= KERNEL_VERSION(2,6,37))
+#if defined(CONFIG_OMAP3530)
+			return open("/dev/video7", O_RDWR); //device node is changed in kernel 2.6.37 from video1 to video7 for beagleboard and am37x
+#else
+			return open("/dev/video1", O_RDWR);
+#endif
+		else
+			return open("/dev/video1",O_RDWR);
+	}
+	else if (id == V4L2_OVERLAY_PLANE_VIDEO2)
+	{
+		return open("/dev/video2", O_RDWR);
+	}
+	return -EINVAL;
 }
 
 void dump_pixfmt(struct v4l2_pix_format *pix)
