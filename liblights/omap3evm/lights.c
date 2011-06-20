@@ -16,6 +16,10 @@
 
 
 #define LOG_TAG "lights"
+#ifndef KERNEL_VERSION
+#define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
+#endif
+#define MAX_STR_LEN 35
 
 #include <cutils/log.h>
 
@@ -36,8 +40,10 @@
 static pthread_once_t g_init = PTHREAD_ONCE_INIT;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
-char const *const LCD_FILE
+char const *const LCD_FILE_1
 	= "/sys/class/backlight/omap3evm-bklight/brightness";
+char const *const LCD_FILE_2
+        = "/sys/class/backlight/sharp-ls/brightness";
 char const *const KEYBOARD_FILE
 	= "/sys/class/leds/keyboard-backlight/brightness";
 
@@ -63,6 +69,51 @@ char const *const BLUE_DELAY_ON_FILE
 	= "/sys/class/leds/blue/delay_on";
 char const *const BLUE_DELAY_OFF_FILE
 	= "/sys/class/leds/blue/delay_off";
+
+/* return kernel version code by parsing /proc/version,
+   return <= 0 if error happens */
+int get_kernel_version()
+{
+	char *verstring, *dummy;
+	int fd;
+	int major,minor,rev,ver=-1;
+	if ((verstring = (char *) malloc(MAX_STR_LEN)) == NULL )
+	{
+		LOGE("Failed to allocate memory\n");
+		return -1;
+	}
+	if ((dummy = (char *) malloc(MAX_STR_LEN)) == NULL )
+	{
+		LOGE("Failed to allocate memory\n");
+		free (verstring);
+		return -1;
+	}
+
+	if ((fd = open("/proc/version", O_RDONLY)) < 0)
+	{
+		LOGE("Failed to open file /proc/version\n");
+		goto ret;
+	}
+	if (read(fd, verstring, MAX_STR_LEN) < 0)
+	{
+		LOGE("Failed to read kernel version string from /proc/version file\n");
+		close(fd);
+		goto ret;
+	}
+	close(fd);
+	if (sscanf(verstring, "%s %s %d.%d.%d%s\n", dummy, dummy, &major, &minor, &rev, dummy) != 6)
+	{
+			LOGE("Failed to read kernel version numbers\n");
+	        goto ret;
+	}
+	ver = KERNEL_VERSION(major, minor, rev);
+
+ret:
+	free(verstring);
+	free(dummy);
+
+	return ver;
+}
 
 
 void init_globals(void)
@@ -113,11 +164,29 @@ set_light_backlight(struct light_device_t *dev,
 {
     int err = 0;
     int brightness = rgb_to_brightness(state);
+    int ver = get_kernel_version();
+
+    if(ver <= 0)
+    {
+	LOGE("Failed to parse kernel version\n");
+	return -1;
+    }
+
     brightness = brightness*100/255;
     pthread_mutex_lock(&g_lock);
-    err = write_int(LCD_FILE, brightness);
-    if (err != 0)
-	LOGI("write_int failed to open %s\n", LCD_FILE);
+
+    if(ver >= KERNEL_VERSION(2,6,37))
+    {
+	    err = write_int(LCD_FILE_2, brightness);
+	    if (err != 0)
+		    LOGI("write_int failed to open %s\n", LCD_FILE_2);
+    }
+    else
+    {
+	    err = write_int(LCD_FILE_1, brightness);
+	    if (err != 0)
+		    LOGI("write_int failed to open %s\n", LCD_FILE_1);
+    }
 
     pthread_mutex_unlock(&g_lock);
     return err;
