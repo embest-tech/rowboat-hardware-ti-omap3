@@ -40,7 +40,11 @@ extern "C" {
 #define ENTITY_CCDC_NAME                "OMAP3 ISP CCDC"
 #define ENTITY_TVP514X_NAME             "tvp514x 3-005c"
 #define ENTITY_MT9T111_NAME             "mt9t111 2-003c"
+#ifdef CONFIG_FLASHBOARD
+#define ENTITY_MT9V113_NAME             "mt9v113 3-003c"
+#else
 #define ENTITY_MT9V113_NAME             "mt9v113 2-003c"
+#endif
 #define IMG_WIDTH_VGA           640
 #define IMG_HEIGHT_VGA          480
 #define DEF_PIX_FMT             V4L2_PIX_FMT_UYVY

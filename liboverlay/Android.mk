@@ -20,6 +20,9 @@ include $(CLEAR_VARS)
 ifeq ($(TARGET_PRODUCT), omap3evm)
 LOCAL_CFLAGS += -DCONFIG_OMAP3530
 endif
+ifeq ($(TARGET_PRODUCT), flashboard)
+LOCAL_CFLAGS += -DCONFIG_OMAP3530
+endif
 ifeq ($(TARGET_PRODUCT), beagleboard)
 LOCAL_CFLAGS += -DCONFIG_OMAP3530
 endif

@@ -35,7 +35,8 @@
 #define LOG_FUNCTION_START    LOGD("%d: %s() ENTER", __LINE__, __FUNCTION__);
 #define LOG_FUNCTION_EXIT    LOGD("%d: %s() EXIT", __LINE__, __FUNCTION__);
 
-#define _OMAP_RESIZER_ 0
+/* TODO: enable once resizer driver is up */
+/* #define _OMAP_RESIZER_ 0 */
 
 #ifdef _OMAP_RESIZER_
 #include "saResize.h"

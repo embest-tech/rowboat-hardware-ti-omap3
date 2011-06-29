@@ -6,6 +6,10 @@ ifneq ($(USE_CAMERA_STUB),true)
 #
 include $(CLEAR_VARS)
 
+ifeq ($(TARGET_PRODUCT), flashboard)
+LOCAL_CFLAGS += -DCONFIG_FLASHBOARD
+endif
+
 LOCAL_SRC_FILES:= \
     CameraHardware.cpp \
     saResize.cpp \
