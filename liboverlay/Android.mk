@@ -12,28 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-LOCAL_PATH:= $(call my-dir)
-# HAL module implemenation, not prelinked and stored in
-# hw/<COPYPIX_HARDWARE_MODULE_ID>.<ro.product.board>.so
-
-include $(CLEAR_VARS)
-ifeq ($(TARGET_PRODUCT), omap3evm)
-LOCAL_CFLAGS += -DCONFIG_OMAP3530
+# Only built for omap3evm
+ifeq ($(strip $(TARGET_BOOTLOADER_BOARD_NAME)),omap3evm)
+  include hardware/ti/omap3/liboverlay/$(TARGET_PRODUCT)/Android.mk
 endif
-ifeq ($(TARGET_PRODUCT), beagleboard)
-LOCAL_CFLAGS += -DCONFIG_OMAP3530
-endif
-LOCAL_PRELINK_MODULE := false
-LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
-LOCAL_SHARED_LIBRARIES := liblog libcutils
-
-ifdef OMAP_ENHANCEMENT
-LOCAL_SRC_FILES := overlay_ex.cpp
-else
-LOCAL_SRC_FILES := overlay.cpp
-endif
-LOCAL_SRC_FILES += v4l2_utils.c
-
-LOCAL_MODULE_TAGS := eng
-LOCAL_MODULE := overlay.omap3
-include $(BUILD_SHARED_LIBRARY)
