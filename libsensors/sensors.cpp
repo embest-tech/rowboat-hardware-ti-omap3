@@ -33,6 +33,7 @@
 #include "sensors.h"
 
 #include "AccelSensor.h"
+#include "GyroSensor.h"
 
 /*****************************************************************************/
 
@@ -68,6 +69,11 @@ static const struct sensor_t sSensorList[] = {
           "ST Microelectronics",
           1, SENSORS_ACCELERATION_HANDLE,
           SENSOR_TYPE_ACCELEROMETER, RANGE_A, RESOLUTION_A, 0.23f, 20000, { } },
+	{ "Gyroscope sensor",
+		"STMicroelectronics",
+		1, SENSORS_GYROSCOPE_HANDLE,
+		SENSOR_TYPE_GYROSCOPE, RANGE_GYRO, CONVERT_GYRO, 6.1f, 1190, { } },
+
 };
 
 
@@ -111,6 +117,7 @@ struct sensors_poll_context_t {
 private:
     enum {
         accel           = 0,
+	gyro		= 1,
         numSensorDrivers,
         numFds,
 
@@ -127,6 +134,8 @@ private:
 	    switch (handle) {
 		    case ID_A:
 			    return accel;
+		    case ID_GY:
+			    return gyro;
 	    }
 	    return -EINVAL;
     }
@@ -140,6 +149,11 @@ sensors_poll_context_t::sensors_poll_context_t()
 	mPollFds[accel].fd = mSensors[accel]->getFd();
 	mPollFds[accel].events = POLLIN;
 	mPollFds[accel].revents = 0;
+
+	mSensors[gyro] = new GyroSensor();
+	mPollFds[gyro].fd = mSensors[gyro]->getFd();
+	mPollFds[gyro].events = POLLIN;
+	mPollFds[gyro].revents = 0;
 
 	int wakeFds[2];
 	int result = pipe(wakeFds);

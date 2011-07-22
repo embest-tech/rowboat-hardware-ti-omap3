@@ -113,7 +113,6 @@ int SensorBase::openInput(const char* inputName) {
             if (ioctl(fd, EVIOCGNAME(sizeof(name) - 1), &name) < 1) {
                 name[0] = '\0';
             }
-	    LOGE_IF(1, "pankaj: '%s' input device", name);
             if (!strcmp(name, inputName)) {
                 strcpy(input_name, filename);
                 break;
