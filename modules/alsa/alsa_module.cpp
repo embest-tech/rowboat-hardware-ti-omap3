@@ -444,8 +444,8 @@ LOGV("%s", __FUNCTION__);
     /* for output devices */
     if (devices & 0x0000FFFF){
         if (devices & AudioSystem::DEVICE_OUT_SPEAKER) {
-            control.set("HeadsetR Mixer AudioR1", 1); // on
-            control.set("HeadsetL Mixer AudioL1", 1); // on
+            control.set("HeadsetR Mixer AudioR2", 1); // on
+            control.set("HeadsetL Mixer AudioL2", 1); // on
             control.set("Headset Playback Volume", 1); //Headset Volume
         } else {
             control.set("HeadsetR Mixer AudioR1", (unsigned int)0); // off
