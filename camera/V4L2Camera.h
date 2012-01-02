@@ -69,6 +69,9 @@ struct mdIn {
 	int mt9t111;
 	int mt9v113;
 	unsigned int num_entities;
+	int capture_height;
+	int capture_width;
+	int link_reset;
 };
 
 class V4L2Camera {
@@ -81,6 +84,7 @@ public:
     int Configure(int width,int height,int pixelformat,int fps);
     void Close ();
     void reset_links(const char *device);
+	int get_current_capture_format();
     int Open_media_device(const char *device);
 
     int BufferMap ();
@@ -91,11 +95,15 @@ public:
     int StopStreaming ();
 
     void GrabPreviewFrame (void *previewBuffer);
-    void GrabRawFrame(void *previewBuffer,unsigned int width, unsigned int height);
-    void GrabJpegFrame (void *captureBuffer);
-    void CreateJpegFromBuffer(void *rawBuffer,void *captureBuffer);
-    int savePicture(unsigned char *inputBuffer, const char * filename);
-    void convert(unsigned char *buf, unsigned char *rgb, int width, int height);
+	void GrabRawFrame(void *previewBuffer, unsigned int width, unsigned int height);
+	int GrabJpegFrame (char* filename);
+	int CopyJpegBufferFromFile(const char *filename, void *captureBuffer, int bSize);
+
+	int CreateJpegFromBuffer(void *rawBuffer, void *captureBuffer);
+	int savePicture(unsigned char *inputBuffer, const char * filename, int width, int height);
+	void convert(unsigned char *buf, unsigned char *rgb, int width, int height);
+	int GetCaptureWidth();
+	int GetCaptureHeight();
 
 private:
     struct vdIn *videoIn;

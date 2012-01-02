@@ -47,6 +47,11 @@ extern "C" {
 #endif
 #define IMG_WIDTH_VGA           640
 #define IMG_HEIGHT_VGA          480
+#define IMG_WIDTH_PAL_NTSC		720
+#define IMG_HEIGHT_NTSC     	480
+#define IMG_HEIGHT_PAL      	576
+
+
 #define DEF_PIX_FMT             V4L2_PIX_FMT_UYVY
 
 #include "V4L2Camera.h"
@@ -58,7 +63,14 @@ V4L2Camera::V4L2Camera ()
 {
     videoIn = (struct vdIn *) calloc (1, sizeof (struct vdIn));
     mediaIn = (struct mdIn *) calloc (1, sizeof (struct mdIn));
+#ifdef _USE_TVP51X_
+    mediaIn->input_source=3;
+#else /* use camera sensor */
     mediaIn->input_source=1;
+#endif //_USE_TVP51X_
+	mediaIn->capture_width=IMG_WIDTH_VGA;
+	mediaIn->capture_height=IMG_HEIGHT_VGA;
+	mediaIn->link_reset = 0;
     camHandle = -1;
 #ifdef _OMAP_RESIZER_
 	videoIn->resizeHandle = -1;
@@ -83,7 +95,7 @@ int V4L2Camera::Open(const char *device)
 	{
 		if ((camHandle = open(device, O_RDWR)) == -1) {
 			LOGE("ERROR opening V4L interface: %s", strerror(errno));
-			if(version >= KERNEL_VERSION(2,6,37));
+			if(version >= KERNEL_VERSION(2,6,37))
 				reset_links(MEDIA_DEVICE);
 			return -1;
 		}
@@ -96,11 +108,13 @@ int V4L2Camera::Open(const char *device)
 				reset_links(MEDIA_DEVICE);
 				return -1;
 			}
+			LOGD("Getting Current Format!!!!!!!!!!!!!!!!!!!!!");
+			get_current_capture_format();
 			fmt.pad = 0;
 			fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
 			fmt.format.code = V4L2_MBUS_FMT_UYVY8_2X8;
-			fmt.format.width = IMG_WIDTH_VGA;
-			fmt.format.height = IMG_HEIGHT_VGA;
+			fmt.format.width = mediaIn->capture_width; //IMG_WIDTH_VGA;
+			fmt.format.height = mediaIn->capture_height; //IMG_HEIGHT_VGA;
 			fmt.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
 			fmt.format.field = V4L2_FIELD_INTERLACED;
 			ret = ioctl(ccdc_fd, VIDIOC_SUBDEV_S_FMT, &fmt);
@@ -112,16 +126,16 @@ int V4L2Camera::Open(const char *device)
 			fmt.pad = 1;
 			fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
 			fmt.format.code = V4L2_MBUS_FMT_UYVY8_2X8;
-			fmt.format.width = IMG_WIDTH_VGA;
-			fmt.format.height = IMG_HEIGHT_VGA;
+			fmt.format.width = mediaIn->capture_width; //IMG_WIDTH_VGA;
+			fmt.format.height = mediaIn->capture_height; //IMG_HEIGHT_VGA;
 			fmt.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
 			fmt.format.field = V4L2_FIELD_INTERLACED;
 			ret = ioctl(ccdc_fd, VIDIOC_SUBDEV_S_FMT, &fmt);
 			if(ret) {
 				LOGE("Failed to set format on pad");
 			}
-			mediaIn->input_source=1;
-			if (mediaIn->input_source != 0)
+
+			if (mediaIn->input_source != 1)
 				strcpy(subdev, "/dev/v4l-subdev8");
 			else
 				strcpy(subdev, "/dev/v4l-subdev9");
@@ -132,6 +146,20 @@ int V4L2Camera::Open(const char *device)
 				close(camHandle);
 				reset_links(MEDIA_DEVICE);
 				return ret;
+			}
+			memset(&fmt, 0, sizeof(fmt));
+		    fmt.pad = 0;
+			fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+			fmt.format.code = V4L2_MBUS_FMT_UYVY8_2X8;
+			fmt.format.width = mediaIn->capture_width;
+			fmt.format.height =  mediaIn->capture_height;
+			fmt.format.colorspace = V4L2_COLORSPACE_SMPTE170M;
+			fmt.format.field = V4L2_FIELD_INTERLACED;
+
+			ret = ioctl(tvp_fd, VIDIOC_SUBDEV_S_FMT, &fmt);
+			if(ret) {
+				printf("failed to set format on pad %x\n", fmt.pad);
+			return ret;
 			}
 		}
 
@@ -161,12 +189,90 @@ int V4L2Camera::Open(const char *device)
 	LOG_FUNCTION_EXIT
     return ret;
 }
+int V4L2Camera::get_current_capture_format()
+{
+	struct v4l2_standard standard;
+	struct v4l2_input input;
 
+	v4l2_std_id std_id;
+	int index;
+
+	if(mediaIn->input_source != 3)
+	{
+		/* for camera sensor no need to query standard */
+		LOGD("Camera input.....");
+		return 0;
+	}
+    index = 0;
+    if (ioctl(camHandle, VIDIOC_S_INPUT, &index) < 0) {
+        LOGE("Fail:VIDIOC_S_INPUT");
+    }
+	memset(&input, 0, sizeof(struct v4l2_input));
+    input.index = index;
+
+	if (ioctl(camHandle, VIDIOC_ENUMINPUT, &input) < 0) {
+        LOGE("Fail:VIDIOC_ENUMINPUT");
+    }
+    LOGD("Input changed to: %s\n",input.name);
+
+	/* Detect the standard in the input detected */
+    if (ioctl(camHandle,VIDIOC_QUERYSTD, &std_id) < 0) {
+        LOGE("FAIL:VIDIOC_QUERYSTD");
+		return -1;
+    }
+
+    /* Get the standard*/
+    if (ioctl(camHandle, VIDIOC_G_STD, &std_id) < 0) {
+        /* Note when VIDIOC_ENUMSTD always returns EINVAL this
+           is no video device or it falls under the USB exception,
+           and VIDIOC_G_STD returning EINVAL is no error. */
+        LOGD("FAIL:VIDIOC_G_STD");
+		return -1;
+    }
+    memset(&standard, 0, sizeof(standard));
+    standard.index = 0;
+    while (1) {
+        if (ioctl(camHandle, VIDIOC_ENUMSTD, &standard) < 0) {
+            LOGD("FAIL:VIDIOC_ENUMSTD");
+			return -1;
+        }
+
+        /* Store the name of the standard */
+        if (standard.id & std_id) {
+            LOGD("Current standard: %s\n",standard.name);
+            break;
+        }
+        standard.index++;
+    }
+
+    mediaIn->capture_width = IMG_WIDTH_PAL_NTSC;
+    if (!strcmp((char *)standard.name, "PAL"))
+        mediaIn->capture_height = IMG_HEIGHT_PAL;
+    else
+        mediaIn->capture_height = IMG_HEIGHT_NTSC;
+
+	LOGD("WidthxHeight dectected is:[%d x %d]", mediaIn->capture_width,mediaIn->capture_height);
+	return 0;
+}
+int V4L2Camera::GetCaptureWidth()
+{
+	if(mediaIn != NULL)
+		return mediaIn->capture_width;
+	else
+		return 0;
+}
+int V4L2Camera::GetCaptureHeight()
+{
+	if(mediaIn != NULL)
+		return mediaIn->capture_height;
+	else
+		return 0;
+}
 int V4L2Camera::Open_media_device(const char *device)
 {
 
 	int ret = 0;
-	int index = 0;
+	unsigned int index = 0;
 	int i;
 	struct media_link_desc link;
 	struct media_links_enum links;
@@ -190,7 +296,13 @@ int V4L2Camera::Open_media_device(const char *device)
 			if (!strcmp(mediaIn->entity[index].name, ENTITY_VIDEO_CCDC_OUT_NAME))
 				mediaIn->video =  mediaIn->entity[index].id;
 			else if (!strcmp(mediaIn->entity[index].name, ENTITY_TVP514X_NAME))
+			{
+				LOGD("TVP51x detected!!!:%s,subdev:%d",ENTITY_TVP514X_NAME,mediaIn->entity[index].group_id);
 				mediaIn->tvp5146 =  mediaIn->entity[index].id;
+#ifdef _USE_TVP51X_
+				mediaIn->input_source=3;
+#endif //_USE_TVP51X_
+			}
 			else if (!strcmp(mediaIn->entity[index].name, ENTITY_MT9T111_NAME))
 			{
 				mediaIn->mt9t111 =  mediaIn->entity[index].id;
@@ -204,6 +316,8 @@ int V4L2Camera::Open_media_device(const char *device)
 				mediaIn->input_source=2;
 			}
 		}
+		 LOGD("[%d]:%s\n", mediaIn->entity[index].id, mediaIn->entity[index].name);
+
 		index++;
 	}while(ret==0);
 
@@ -212,6 +326,11 @@ int V4L2Camera::Open_media_device(const char *device)
 		close(mediaIn->media_fd);
 		return -1;
 	}
+	/* making tvp51x inputs as default */
+#ifdef _USE_TVP51X_
+	mediaIn->input_source=3;
+#endif //_USE_TVP51X_
+
 	mediaIn->num_entities = index;
 
 	/*setup_media_links*/
@@ -252,8 +371,9 @@ int V4L2Camera::Open_media_device(const char *device)
 	link.flags |=  MEDIA_LINK_FLAG_ENABLED;
 	link.source.entity = input_v4l;
 	link.source.index = 0;
-
 	link.source.flags = MEDIA_PAD_FLAG_OUTPUT;
+
+
 	link.sink.entity = mediaIn->ccdc;
 	link.sink.index = 0;
 	link.sink.flags = MEDIA_PAD_FLAG_INPUT;
@@ -292,13 +412,13 @@ int V4L2Camera::Configure(int width,int height,int pixelformat,int fps)
 	struct v4l2_streamparm parm;
 	if(version >= KERNEL_VERSION(2,6,37))
 	{
-		videoIn->width = IMG_WIDTH_VGA;
-		videoIn->height = IMG_HEIGHT_VGA;
-		videoIn->framesizeIn =((IMG_WIDTH_VGA * IMG_HEIGHT_VGA) << 1);
+		videoIn->width = mediaIn->capture_width; // IMG_WIDTH_VGA;
+		videoIn->height = mediaIn->capture_height; //IMG_HEIGHT_VGA;
+		videoIn->framesizeIn =((mediaIn->capture_width * mediaIn->capture_height) << 1);
 		videoIn->formatIn = DEF_PIX_FMT;
 
-		videoIn->format.fmt.pix.width =IMG_WIDTH_VGA;
-		videoIn->format.fmt.pix.height =IMG_HEIGHT_VGA;
+		videoIn->format.fmt.pix.width =mediaIn->capture_width; //IMG_WIDTH_VGA;
+		videoIn->format.fmt.pix.height =mediaIn->capture_height; //IMG_HEIGHT_VGA;
 		videoIn->format.fmt.pix.pixelformat = DEF_PIX_FMT;
 	}
 	else
@@ -383,7 +503,8 @@ void V4L2Camera::reset_links(const char *device)
 {
 	struct media_link_desc link;
 	struct media_links_enum links;
-	int ret, index, i;
+	int ret, i;
+	unsigned int index;
 	/*reset the media links*/
     mediaIn->media_fd= open(device, O_RDWR);
     for(index = 0; index < mediaIn->num_entities; index++)
@@ -419,6 +540,11 @@ void V4L2Camera::reset_links(const char *device)
 void V4L2Camera::Close ()
 {
 	LOG_FUNCTION_START
+
+    /* reset previous setup link */
+//	if(version >= KERNEL_VERSION(2,6,37))
+//	    reset_links(MEDIA_DEVICE);
+
     close(camHandle);
     camHandle = -1;
 #ifdef _OMAP_RESIZER_
@@ -466,6 +592,7 @@ void V4L2Camera::Uninit()
     videoIn->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     videoIn->buf.memory = V4L2_MEMORY_MMAP;
 
+#if 0
     /* Dequeue everything */
     int DQcount = nQueued - nDequeued;
 
@@ -474,6 +601,7 @@ void V4L2Camera::Uninit()
         if (ret < 0)
             LOGE("Uninit: VIDIOC_DQBUF Failed");
     }
+#endif
     nQueued = 0;
     nDequeued = 0;
 
@@ -572,6 +700,7 @@ void V4L2Camera::GrabRawFrame(void *previewBuffer,unsigned int width, unsigned i
     videoIn->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     videoIn->buf.memory = V4L2_MEMORY_MMAP;
 
+//   	LOGD("GrabRawFrame");
 
     DQcount = nQueued - nDequeued;
     if(DQcount == 0)
@@ -596,8 +725,31 @@ void V4L2Camera::GrabRawFrame(void *previewBuffer,unsigned int width, unsigned i
     		videoIn->format.fmt.pix.height != height)
     {
     	//do resize
-    	//LOGE("Resizing required");
-#ifdef _OMAP_RESIZER_
+    	LOGE("Resizing required,Coming Size:[%dx%d], Expected Size:[%dx%d]",videoIn->format.fmt.pix.width,videoIn->format.fmt.pix.height, width,height);
+#ifndef _OMAP_RESIZER_ /* do soft resizing */
+		int count = 0;
+		unsigned char *cap_ptr;
+		unsigned char *dis_ptr;
+		int hstride = 0;
+		int wstride = 0;
+		if(videoIn->format.fmt.pix.height >= height)
+			hstride = height;
+		else
+			hstride = videoIn->format.fmt.pix.height;
+
+		cap_ptr = (unsigned char*)videoIn->mem[videoIn->buf.index];
+        dis_ptr = (unsigned char*)previewBuffer;
+        for (count = 0; count < hstride; count++) {
+			if(videoIn->format.fmt.pix.width >= width)
+	            memcpy(dis_ptr, cap_ptr, width * 2);
+			else
+	            memcpy(dis_ptr, cap_ptr,videoIn->format.fmt.pix.width * 2);
+
+            cap_ptr += videoIn->format.fmt.pix.width * 2;
+            dis_ptr += width * 2;
+        }
+
+#else
 
     ret = OMAPResizerConvert(videoIn->resizeHandle, videoIn->mem[videoIn->buf.index],\
 									videoIn->format.fmt.pix.height,\
@@ -624,7 +776,7 @@ void V4L2Camera::GrabRawFrame(void *previewBuffer,unsigned int width, unsigned i
 }
 
 int 
-V4L2Camera::savePicture(unsigned char *inputBuffer, const char * filename)
+V4L2Camera::savePicture(unsigned char *inputBuffer, const char * filename,int width,int height)
 {
     FILE *output;
     int fileSize;
@@ -636,17 +788,18 @@ V4L2Camera::savePicture(unsigned char *inputBuffer, const char * filename)
         return 0;
     }
 
-    fileSize = saveYUYVtoJPEG(inputBuffer, videoIn->width, videoIn->height, output, 100);
+    //fileSize = saveYUYVtoJPEG(inputBuffer, videoIn->width, videoIn->height, output, 100);
+    fileSize = saveYUYVtoJPEG(inputBuffer, width, height, output, 100);
 
     fclose(output);
     return fileSize;
 }
 
-void V4L2Camera::GrabJpegFrame (void *captureBuffer)
+int V4L2Camera::GrabJpegFrame (char *filename)
 {
     FILE *output;
     FILE *input;
-    int fileSize;
+    int fileSize =0;
     int ret;
 
     LOG_FUNCTION_START
@@ -664,7 +817,7 @@ void V4L2Camera::GrabJpegFrame (void *captureBuffer)
 		nDequeued++;
 
 		LOGE("savePicture");
-		fileSize = savePicture((unsigned char *)videoIn->mem[videoIn->buf.index], "/sdcard/tmp.jpg");
+		fileSize = savePicture((unsigned char *)videoIn->mem[videoIn->buf.index], filename, videoIn->width, videoIn->height);
 
 		LOGE("VIDIOC_QBUF");
 
@@ -675,23 +828,43 @@ void V4L2Camera::GrabJpegFrame (void *captureBuffer)
 			break;
 		}
 		nQueued++;
+	}while(0);
+	LOG_FUNCTION_EXIT
+	return fileSize;
+}
+int V4L2Camera::CopyJpegBufferFromFile(const char *filename,void *captureBuffer,int bSize)
+{
+		FILE *input;
+		LOG_FUNCTION_START
+		if(captureBuffer == NULL || filename == NULL)
+			return -1;
+		LOGE("open file:%s",filename);
+		do{
+			input = fopen(filename, "rb");
 
-		LOGE("fopen temp file");
-		input = fopen("/sdcard/tmp.jpg", "rb");
-
-		if (input == NULL)
-			LOGE("GrabJpegFrame: Input file == NULL");
-		else {
-			fread((uint8_t *)captureBuffer, 1, fileSize, input);
-			fclose(input);
-		}
+			if (input == NULL){
+				LOGE("GrabJpegFrame: Input file == NULL");
+			}else {
+				int fileSize = 0;
+				fseek(input, 0L, SEEK_END);
+				fileSize = ftell(input);
+				if(fileSize <=0 || bSize < fileSize)
+				{
+					LOGE("Can not perform operation size mismatch::FileSize:%d,bSize:%d",fileSize,bSize);
+				}else{
+					/* seek back to the beginning */
+					fseek(input, 0L,SEEK_SET);
+					fread((uint8_t *)captureBuffer, 1, fileSize, input);
+				}
+				fclose(input);
+			}
 		break;
     }while(0);
 
     LOG_FUNCTION_EXIT
-    return;
+    return 0;
 }
-void V4L2Camera::CreateJpegFromBuffer(void *rawBuffer,void *captureBuffer)
+int V4L2Camera::CreateJpegFromBuffer(void *rawBuffer,void *captureBuffer)
 {
     FILE *output;
     FILE *input;
@@ -702,9 +875,9 @@ void V4L2Camera::CreateJpegFromBuffer(void *rawBuffer,void *captureBuffer)
 
     do{
      	LOGE("savePicture");
-		fileSize = savePicture((unsigned char *)rawBuffer, "/sdcard/tmp.jpg");
+		fileSize = savePicture((unsigned char *)rawBuffer, "/sdcard/tmp.jpg", videoIn->width, videoIn->height);
 
-		LOGE("fopen temp file");
+		LOGE("fopen temp file:%d",fileSize);
 		input = fopen("/sdcard/tmp.jpg", "rb");
 
 		if (input == NULL)
@@ -717,7 +890,7 @@ void V4L2Camera::CreateJpegFromBuffer(void *rawBuffer,void *captureBuffer)
     }while(0);
 
     LOG_FUNCTION_EXIT
-    return;
+    return fileSize;
 }
 int V4L2Camera::saveYUYVtoJPEG (unsigned char *inputBuffer, int width, int height, FILE *file, int quality)
 {

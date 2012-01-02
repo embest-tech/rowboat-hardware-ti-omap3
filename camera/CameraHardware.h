@@ -24,9 +24,18 @@
 #include <binder/MemoryBase.h>
 #include <binder/MemoryHeapBase.h>
 #include <utils/threads.h>
+#include <ui/Overlay.h>
 
 #include <jpeglib.h>
 #include "V4L2Camera.h"
+
+#ifdef _USE_OVERLAY_
+extern "C" {
+#include "../liboverlay/v4l2_utils.h"
+}
+
+#define NUM_OVERLAY_BUFFERS NUM_OVERLAY_BUFFERS_REQUESTED
+#endif /*_USE_OVERLAY_ */
 
 namespace android {
 
@@ -66,6 +75,11 @@ public:
     virtual CameraParameters  getParameters() const;
     virtual status_t sendCommand(int32_t cmd, int32_t arg1, int32_t arg2);
     virtual void release();
+#ifdef _USE_OVERLAY_
+	int clearOverlay();
+	virtual bool useOverlay();
+	virtual status_t setOverlay(const sp<Overlay> &overlay);
+#endif /*_USE_OVERLAY_ */
 
     static sp<CameraHardwareInterface> createInstance();
 
@@ -120,13 +134,27 @@ private:
     Mutex               mRecordingLock;
     CameraParameters    mParameters;
 
-    sp<MemoryHeapBase>  mHeap;         // format: 420
+	sp<MemoryHeapBase>  mPictureHeap;         
+	sp<MemoryBase>      mPictureBuffer;
+
+	sp<MemoryHeapBase>  mHeap;         // format: 420
     sp<MemoryBase>      mBuffer;
-    sp<MemoryHeapBase>  mPreviewHeap;
-    sp<MemoryBase>      mPreviewBuffer;
+#ifdef _USE_OVERLAY_
+	sp<MemoryHeapBase>  mPreviewHeap[NUM_OVERLAY_BUFFERS];
+	sp<MemoryBase>      mPreviewBuffer[NUM_OVERLAY_BUFFERS];
+#else
+	sp<MemoryHeapBase>  mPreviewHeap;
+	sp<MemoryBase>      mPreviewBuffer;
+#endif /* _USE_OVERLAY_ */
 	sp<MemoryHeapBase>  mRawHeap;      /* format: 422 */
 	sp<MemoryBase>      mRawBuffer;
     sp<MemoryBase>      mBuffers[kBufferCount];
+#ifdef _USE_OVERLAY_
+	sp<Overlay>  		mOverlay;
+	int					mOverlayWidth;
+	int					mOverlayHeight;
+	overlay_buffer_t 	mOverlayBuffer;
+#endif /*_USE_OVERLAY_ */
 
     V4L2Camera         *mCamera;
     bool                mPreviewRunning;

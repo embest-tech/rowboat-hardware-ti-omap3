@@ -60,8 +60,6 @@ const supported_resolution CameraHardware::supportedPreviewRes[] = {{640, 480} ,
 
 CameraHardware::CameraHardware()
                   : mParameters(),
-					mPreviewHeap(0),
-					mRawHeap(0),
 					mCamera(0),
 					mPreviewFrameSize(0),
 					mNotifyCb(0),
@@ -75,6 +73,20 @@ CameraHardware::CameraHardware()
 	/* create camera */
 	mCamera = new V4L2Camera();
 	version = get_kernel_version();
+#ifdef _USE_OVERLAY_
+	mOverlay = NULL;
+	 int i;
+    for(i = 0; i < NUM_OVERLAY_BUFFERS; i++)
+    {
+        /* clean a preview heap */
+        mPreviewHeap[i] = NULL;
+	}
+#else
+	mPreviewHeap	= NULL;
+	mRawHeap		= NULL;
+#endif //_USE_OVERLAY
+
+	mPictureHeap	= NULL; /* will be used for image capture */
 	if(version <= 0)
 		LOGE("Failed to parse kernel version\n");
 	if(version >= KERNEL_VERSION(2,6,37))
@@ -168,18 +180,69 @@ ret:
 CameraHardware::~CameraHardware()
 {
 	LOG_FUNCTION_START
+#ifdef _USE_OVERLAY_
+	int i;
+	for(i = 0; i < NUM_OVERLAY_BUFFERS; i++)
+	{
+		/* clean a preview heap */
+		if(mPreviewHeap[i] != NULL)
+		{
+			LOGD("mPreviewHeap Cleaning!!!!");
+			mPreviewBuffer[i].clear();
+			mPreviewHeap[i].clear();
+		}
+	}
+#else
+	/* clear heap allocation */
+	if(mPreviewHeap != NULL)
+    {
+        LOGD("mPreviewHeap Cleaning!!!!");
+        mPreviewHeap.clear();
+    }
+    if(mRawHeap != NULL)
+    {
+        LOGD("mRawHeap Cleaning!!!!");
+        mRawHeap.clear();
+    }
+    if(mHeap != NULL)
+    {
+        LOGD("mHeap Cleaning!!!!");
+        mHeap.clear();
+    }
+#endif //_USE_OVERLAY_
+
+	if(mPictureHeap != NULL)
+	{
+		LOGD("mPictureHeap Cleaning!!");
+		mPictureHeap.clear();
+	}
 	mCamera->Uninit();
 	mCamera->StopStreaming();
 	mCamera->Close();
     delete mCamera;
     mCamera = 0;
+#ifdef _USE_OVERLAY_
+	/* destory overlay */
+	if ( mOverlay.get() != NULL )
+    {
+        LOGD("Destroying current overlay");
+        mOverlay->destroy();
+		mOverlayBuffer = NULL;
+		mOverlay = NULL;
+    }
+#endif //_USE_OVERLAY_
+
     LOG_FUNCTION_EXIT
 }
 
 sp<IMemoryHeap> CameraHardware::getPreviewHeap() const
 {
     LOGD("Preview Heap");
+#ifdef _USE_OVERLAY_
+	return 0;
+#else
     return mPreviewHeap;
+#endif //_USE_OVERLAY_
 }
 
 sp<IMemoryHeap> CameraHardware::getRawHeap() const
@@ -269,9 +332,35 @@ int CameraHardware::previewThread()
 {
 	Mutex::Autolock lock(mPreviewLock);
     if (!previewStopped) {
+#ifdef _USE_OVERLAY_
+		int index = 0;
+		if(mOverlay == NULL)
+		{
+			LOGE("Overlay has not been set yet !!");
+			return -1;
+		}
+		if(mOverlay.get() != NULL ){
+			mOverlay->dequeueBuffer(&mOverlayBuffer);
+			index = (int)mOverlayBuffer;
+			//LOGD("mOverlayBuffer dequeue:0x%x",index);
+			if(index >= 0 && index < NUM_OVERLAY_BUFFERS ){
+				//mapping_data_t* data = (mapping_data_t*) mOverlay->getBufferAddress(mOverlayBuffer);
+				if(mPreviewHeap[index]->getBase() != NULL){
+					//LOGD("mapping_data->ptr:%p",data->ptr);
+					mCamera->GrabRawFrame(mPreviewHeap[index]->getBase(),mOverlayWidth,mOverlayHeight);
+					mOverlay->queueBuffer(mOverlayBuffer);
+				}
+			}else{
+				LOGE("Invalid overlaybuffer index!!!");
+				return NO_ERROR;
+			}
 
+		}
+		if (mMsgEnabled & CAMERA_MSG_PREVIEW_FRAME) {
+            mDataCb(CAMERA_MSG_PREVIEW_FRAME, mPreviewBuffer[index], mCallbackCookie);
+		}
+#else
 		mCamera->GrabRawFrame(mRawHeap->getBase(),mPreviewWidth,mPreviewHeight);
-
 		yuyv422_to_yuv420sp((unsigned char *)mRawHeap->getBase(),
 		                             (unsigned char *)mHeap->getBase(),
 		                              mPreviewWidth, mPreviewHeight);
@@ -286,16 +375,14 @@ int CameraHardware::previewThread()
             mCamera->convert((unsigned char *) mRawHeap->getBase(),
                              (unsigned char *) mPreviewHeap->getBase(),
                              mPreviewWidth, mPreviewHeight);
-
-
-
-            mDataCb(CAMERA_MSG_PREVIEW_FRAME, mBuffer, mCallbackCookie);
-        }
-
-        if (UNLIKELY(mDebugFps)) {
-            showFPS("Preview");
-        }
-    }
+            //mDataCb(CAMERA_MSG_PREVIEW_FRAME, mBuffer, mCallbackCookie);
+            mDataCb(CAMERA_MSG_PREVIEW_FRAME, mPreviewBuffer, mCallbackCookie);
+		}
+#endif //_USE_OVERLAY_
+		if (UNLIKELY(mDebugFps)) {
+				showFPS("Preview");
+		}
+	}
 	return NO_ERROR;
 }
 
@@ -339,6 +426,7 @@ status_t CameraHardware::startPreview()
 		return INVALID_OPERATION;
 	}
 
+#ifndef _USE_OVERLAY_
    /* clear previously buffers*/
 	if(mPreviewHeap != NULL)
 	{
@@ -368,6 +456,7 @@ status_t CameraHardware::startPreview()
 
     mRawHeap = new MemoryHeapBase(mPreviewFrameSize);
     mRawBuffer = new MemoryBase(mRawHeap, 0, mPreviewFrameSize);
+#endif //_USE_OVERLAY_
 
     ret = mCamera->BufferMap();
     if (ret) {
@@ -388,30 +477,59 @@ status_t CameraHardware::startPreview()
      LOG_FUNCTION_EXIT
     return NO_ERROR;
 }
-
+#ifdef _USE_OVERLAY_
+int CameraHardware::clearOverlay()
+{
+	LOG_FUNCTION_START
+	if(mOverlay.get() != NULL)
+    {
+        int buffer_count;
+        buffer_count = mOverlay->getBufferCount();
+        LOGD("number of buffers of overlay = %d,width:%d,height:%d\n", buffer_count,mOverlay->getWidth(),mOverlay->getHeight());
+        if(buffer_count > 0 && buffer_count <= NUM_OVERLAY_BUFFERS)
+        {
+            int i;
+            for(i = 0; i < buffer_count; i++)
+            {
+    			/* clear a preview heap */
+                if(mPreviewHeap[i] != NULL)
+                {
+                    LOGD("mPreviewHeap Cleaning!!!!");
+					mPreviewBuffer[i].clear();
+                    mPreviewHeap[i].clear();
+                }
+            }
+        }
+		//mOverlay->destroy();
+		//mOverlayBuffer = NULL;
+    }
+	LOG_FUNCTION_EXIT
+	return NO_ERROR;
+}
+#endif //_USE_OVERLAY_
 void CameraHardware::stopPreview()
 {
 	LOG_FUNCTION_START
-    sp<PreviewThread> previewThread;
+	previewStopped = true;
     { // scope for the lock
         Mutex::Autolock lock(mPreviewLock);
-        previewStopped = true;
-        previewThread = mPreviewThread;
-    }
-
-    if (mPreviewThread != 0) {
-        mCamera->Uninit();
-        mCamera->StopStreaming();
-        mCamera->Close();
-    }
-
+		if(mPreviewThread != 0)
+		{
+	        previewStopped = true;
+        	mCamera->Uninit();
+        	mCamera->StopStreaming();
+	        mCamera->Close();
+		}
+	}
     // don't hold the lock while waiting for the thread to quit
-	if (previewThread != 0) {
-		previewThread->requestExitAndWait();
+	if (mPreviewThread!= 0) {
+		mPreviewThread->requestExitAndWait();
 	}
 
-    Mutex::Autolock lock(mPreviewLock);
+	LOGD("Error:7!");
     mPreviewThread.clear();
+   // Mutex::Autolock lock(mPreviewLock);
+	LOGD("Error:8!");
     LOG_FUNCTION_EXIT
     return;
 }
@@ -496,6 +614,7 @@ int CameraHardware::beginPictureThread(void *cookie)
 int CameraHardware::pictureThread()
 {
 	LOG_FUNCTION_START
+	previewStopped = true;
     LOGE("Picture Thread:%d",mMsgEnabled);
     if (mMsgEnabled & CAMERA_MSG_SHUTTER) {
     	// TODO: Don't notify SHUTTER for now, avoid making camera service
@@ -510,10 +629,31 @@ int CameraHardware::pictureThread()
 
     if (mMsgEnabled & CAMERA_MSG_COMPRESSED_IMAGE) {
         LOGD("Take Picture COMPRESSED IMAGE");
-        mCamera->CreateJpegFromBuffer(mRawHeap->getBase(),mHeap->getBase());
-        mDataCb(CAMERA_MSG_COMPRESSED_IMAGE, mBuffer, mCallbackCookie);
+		if(mPictureHeap != NULL)
+		{
+			mPictureHeap.clear();
+			mPictureHeap.clear();
+		}
+		int mHeapSize = 0;
+#ifdef _USE_OVERLAY_
+		mHeapSize = mCamera->savePicture((unsigned char *)mPreviewHeap[0]->getBase(), "/sdcard/tmp.jpg",mOverlayWidth,mOverlayHeight);
+#else
+		mHeapSize = mCamera->savePicture((unsigned char *)mRawHeap->getBase(), "/sdcard/tmp.jpg",mPreviewWidth,mPreviewHeight);
+#endif //_USE_OVERLAY_
+		LOGD("Heap Size is :%d",mHeapSize);
+		mHeapSize+=1;
+		if(mHeapSize > 0){
+			mPictureHeap = new MemoryHeapBase(mHeapSize);
+			mPictureBuffer = new MemoryBase(mPictureHeap, 0, mHeapSize);
+			mCamera->CopyJpegBufferFromFile("/sdcard/tmp.jpg",mPictureHeap->getBase(),mHeapSize);
+		}
+        mDataCb(CAMERA_MSG_COMPRESSED_IMAGE, mPictureBuffer, mCallbackCookie);
+		LOGD("After callback clearing buffer");
+		mPictureBuffer.clear();
+		mPictureHeap.clear();
    }
 	LOG_FUNCTION_EXIT
+	previewStopped = true;
 	return NO_ERROR;
 }
 
@@ -592,8 +732,9 @@ status_t CameraHardware::setParameters(const CameraParameters& params)
 
 CameraParameters CameraHardware::getParameters() const
 {
-    CameraParameters params;
+	 LOGD("Get Parameter...!! ");
 
+    CameraParameters params;
     {
         Mutex::Autolock lock(mLock);
         params = mParameters;
@@ -610,7 +751,92 @@ status_t CameraHardware::sendCommand(int32_t cmd, int32_t arg1, int32_t arg2)
 void CameraHardware::release()
 {
 }
+#ifdef _USE_OVERLAY_
+bool CameraHardware::useOverlay()
+{
+	LOGE("In USe overlay\n");
+	mOverlayBuffer = NULL;
+	return true;
+}
 
+status_t CameraHardware::setOverlay(const sp<Overlay> &overlay)
+{
+	LOG_FUNCTION_START
+    Mutex::Autolock lock(mLock);
+    int w,h;
+	mOverlayBuffer = 0;
+    LOGD("CameraHal setOverlay/1/%08lx", (long unsigned int)overlay.get());
+    if ( mOverlay.get() != NULL )
+    {
+    	LOGD("CameraHal setOverlay/1/%08lx/%08lx", (long unsigned int)overlay.get(), (long unsigned int)mOverlay.get());
+        LOGD("Destroying current overlay");
+        mOverlay->destroy();
+		mOverlayBuffer = NULL;
+    }
+
+    mOverlay = overlay;
+    if (mOverlay == NULL)
+    {
+        LOGE("Trying to set overlay, but overlay is null!, line:%d",__LINE__);
+		mOverlayBuffer = NULL;
+        return NO_ERROR;
+    }
+
+    mParameters.getPreviewSize(&w, &h);
+	mOverlayWidth = w;
+	mOverlayHeight = h;
+    {
+		int cWidth = mCamera->GetCaptureWidth();
+		int cHeight = mCamera->GetCaptureHeight();
+		int ret;
+		LOGD("Seting Resized in put !!!!:[%dx%d]",cWidth,cHeight);
+		if(cWidth > 0 && cHeight > 0)
+		{
+			ret = mOverlay->resizeInput(cWidth, cHeight);
+			if(ret < 0)
+			{
+				LOGE("Setting overlay resize is failed!!");
+			}
+			else
+			{
+				LOGD("Resize successfull !!");
+				mOverlayWidth = cWidth;
+				mOverlayHeight = cHeight;
+			}
+		}
+    }
+	/* start stream */
+	if(mOverlay != 0)
+    {
+		int buffer_count;
+		mapping_data_t* data;
+		mPreviewFrameSize = mOverlayWidth * mOverlayHeight * 2;
+		buffer_count = mOverlay->getBufferCount();
+		LOGD("number of buffers of overlay = %d,width:%d,height:%d\n", buffer_count,mOverlay->getWidth(),mOverlay->getHeight());
+		if(buffer_count > 0 && buffer_count <= NUM_OVERLAY_BUFFERS)
+		{
+			int i;
+			for(i = 0; i < buffer_count; i++)
+			{
+				mOverlay->queueBuffer((void *)i);
+				/* creat a preview heap */
+				if(mPreviewHeap[i] != NULL)
+				{
+        			LOGD("mPreviewHeap Cleaning!!!!");
+			        mPreviewHeap[i].clear();
+    			}
+				data = (mapping_data_t*) mOverlay->getBufferAddress((void *)i);
+		        mPreviewHeap[i] 	= new MemoryHeapBase(data->fd,mPreviewFrameSize, 0, data->offset);
+        		mPreviewBuffer[i] 	= new MemoryBase(mPreviewHeap[i], 0,mPreviewFrameSize);
+			}
+		}
+    }
+
+
+	LOG_FUNCTION_EXIT
+   	return NO_ERROR;
+}
+#endif //_USE_OVERLAY_
 sp<CameraHardwareInterface> CameraHardware::createInstance()
 {
 /*    if (singleton != 0) {
