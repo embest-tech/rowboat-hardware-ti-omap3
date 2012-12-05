@@ -33,8 +33,20 @@
 #define VIDEO_DEVICE_2      "/dev/video2"
 #define VIDEO_DEVICE_0      "/dev/video0"
 #define MEDIA_DEVICE        "/dev/media0"
+
+
+#ifdef CONFIG_CAMERA_CAPE
+#define PREVIEW_WIDTH       256
+#define PREVIEW_HEIGHT      256
+#define PICTURE_WIDTH       256
+#define PICTURE_HEIGHT      256
+#else
 #define PREVIEW_WIDTH       320
 #define PREVIEW_HEIGHT      240
+#define PICTURE_WIDTH       320
+#define PICTURE_HEIGHT      240
+#endif
+
 #define PIXEL_FORMAT        V4L2_PIX_FMT_YUYV
 
 #define CAMHAL_GRALLOC_USAGE GRALLOC_USAGE_HW_TEXTURE | \
@@ -56,11 +68,20 @@ int version=0;
 namespace android {
 
 /* 29/12/10 : preview/picture size validation logic */
+
+#ifdef CONFIG_CAMERA_CAPE
+const char CameraHardware::supportedPictureSizes [] = "1024x720,512x512,256x256";
+const char CameraHardware::supportedPreviewSizes [] = "256x256";
+
+const supported_resolution CameraHardware::supportedPictureRes[] = {{1024, 720},{512, 512}, {256,256} };
+const supported_resolution CameraHardware::supportedPreviewRes[] = {{256, 256} };
+#else
 const char CameraHardware::supportedPictureSizes [] = "640x480,352x288,320x240";
 const char CameraHardware::supportedPreviewSizes [] = "640x480,352x288,320x240";
 
 const supported_resolution CameraHardware::supportedPictureRes[] = {{640, 480}, {352, 288}, {320, 240} };
 const supported_resolution CameraHardware::supportedPreviewRes[] = {{640, 480}, {352, 288}, {320, 240} };
+#endif
 
 CameraHardware::CameraHardware()
                   : mParameters(),
@@ -115,7 +136,7 @@ void CameraHardware::initDefaultParameters()
     p.setPreviewFrameRate(DEFAULT_FRAME_RATE);
     p.setPreviewFormat(CameraParameters::PIXEL_FORMAT_YUV422SP);
 
-    p.setPictureSize(PREVIEW_WIDTH, PREVIEW_HEIGHT);
+    p.setPictureSize(PICTURE_WIDTH, PICTURE_HEIGHT);
     p.setPictureFormat(CameraParameters::PIXEL_FORMAT_JPEG);
     p.set(CameraParameters::KEY_JPEG_QUALITY, 100);
     p.set("picture-size-values", CameraHardware::supportedPictureSizes);
@@ -586,7 +607,6 @@ int CameraHardware::pictureThread()
 
      int width, height;
      mParameters.getPictureSize(&width, &height);
-     mParameters.getPreviewSize(&width, &height);
 
      if(version >= KERNEL_VERSION(2,6,37)) {
          if (mCamera->Open(VIDEO_DEVICE_2) < 0)
@@ -596,7 +616,7 @@ int CameraHardware::pictureThread()
              return INVALID_OPERATION;
      }
 
-     ret = mCamera->Configure(mPreviewWidth,mPreviewHeight,PIXEL_FORMAT,30);
+     ret = mCamera->Configure(width,height,PIXEL_FORMAT,30);
      if(ret < 0) {
 	     ALOGE("Fail to configure camera device");
 	     return INVALID_OPERATION;
