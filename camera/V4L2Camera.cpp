@@ -629,7 +629,6 @@ camera_memory_t* V4L2Camera::GrabJpegFrame (camera_request_memory mRequestMemory
     videoIn->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     videoIn->buf.memory = V4L2_MEMORY_MMAP;
 
-#ifdef CONFIG_CAMERA_CAPE
     /*Skip some initial frames*/
     for (int i= 0; i< 20; i++)
     {
@@ -648,7 +647,6 @@ camera_memory_t* V4L2Camera::GrabJpegFrame (camera_request_memory mRequestMemory
 	    }
 	    nQueued++;
     }
-#endif
 
     do{
 	    ALOGV("Dequeue buffer");

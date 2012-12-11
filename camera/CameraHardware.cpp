@@ -76,11 +76,21 @@ const char CameraHardware::supportedPreviewSizes [] = "256x256";
 const supported_resolution CameraHardware::supportedPictureRes[] = {{1024, 720},{512, 512}, {256,256} };
 const supported_resolution CameraHardware::supportedPreviewRes[] = {{256, 256} };
 #else
+
+#ifdef _USE_USB_CAMERA_
+const char CameraHardware::supportedPictureSizes [] = "320x240";
+const char CameraHardware::supportedPreviewSizes [] = "320x240";
+
+const supported_resolution CameraHardware::supportedPictureRes[] = {{320, 240} };
+const supported_resolution CameraHardware::supportedPreviewRes[] = {{320, 240}};
+#else
 const char CameraHardware::supportedPictureSizes [] = "640x480,352x288,320x240";
 const char CameraHardware::supportedPreviewSizes [] = "640x480,352x288,320x240";
-
+ 
 const supported_resolution CameraHardware::supportedPictureRes[] = {{640, 480}, {352, 288}, {320, 240} };
 const supported_resolution CameraHardware::supportedPreviewRes[] = {{640, 480}, {352, 288}, {320, 240} };
+
+#endif
 #endif
 
 CameraHardware::CameraHardware()
