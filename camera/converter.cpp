@@ -21,9 +21,9 @@
 #include "converter.h"
 extern int version;
 
-#ifndef KERNEL_VERSION
-#define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
-#endif
+#include <utils/Log.h>
+
+#define KERNEL_VERSION(a,b) (((a) << 16) + ((b) << 8) )
 
 void
 yuyv422_to_yuv420(unsigned char *bufsrc, unsigned char *bufdest, int width, int height)
@@ -443,7 +443,7 @@ void convertYUYVtoRGB565(unsigned char *buf, unsigned char *rgb, int width, int 
     for (y = 0; y < blocks; y+=4) {
         unsigned char Y1, Y2, U, V;
 
-    if(version >= KERNEL_VERSION(2,6,37)) {
+    if(version == KERNEL_VERSION(2,6)) {
         U = buf[y + 0];
         Y1 = buf[y + 1];
         V = buf[y + 2];

@@ -51,6 +51,8 @@ extern "C" {
 
 #include "V4L2Camera.h"
 
+#define KERNEL_VERSION(a,b) (((a) << 16) + ((b) << 8) )
+
 namespace android {
 
 V4L2Camera::V4L2Camera ()
@@ -81,12 +83,12 @@ int V4L2Camera::Open(const char *device)
 	do
 	{
 		if ((camHandle = open(device, O_RDWR)) == -1) {
-			ALOGE("ERROR opening V4L interface: %s", strerror(errno));
-			if(version >= KERNEL_VERSION(2,6,37))
+			ALOGE("ERROR opening V4L interface: %s %s", strerror(errno),device);
+			if(version == KERNEL_VERSION(2,6))
 				reset_links(MEDIA_DEVICE);
 			return -1;
 		}
-		if(version >= KERNEL_VERSION(2,6,37))
+		if(version == KERNEL_VERSION(2,6))
 		{
 			ccdc_fd = open("/dev/v4l-subdev2", O_RDWR);
 			if(ccdc_fd == -1) {
@@ -285,7 +287,7 @@ int V4L2Camera::Configure(int width,int height,int pixelformat,int fps)
 	int ret = 0;
 	struct v4l2_streamparm parm;
 
-	if(version >= KERNEL_VERSION(2,6,37))
+	if(version == KERNEL_VERSION(2,6))
 	{
 		videoIn->width = IMG_WIDTH_VGA;
 		videoIn->height = IMG_HEIGHT_VGA;
@@ -750,7 +752,7 @@ int V4L2Camera::saveYUYVtoJPEG (unsigned char *inputBuffer, int width, int heigh
             int r, g, b;
             int y, u, v;
 
-			if(version >= KERNEL_VERSION(2,6,37))
+			if(version == KERNEL_VERSION(2,6))
 			{
 				if (!z)
 					y = yuyv[1] << 8;
@@ -830,7 +832,7 @@ void V4L2Camera::convert(unsigned char *buf, unsigned char *rgb, int width, int 
 
     for (y = 0; y < blocks; y+=4) {
         unsigned char Y1, Y2, U, V;
-		if(version >= KERNEL_VERSION(2,6,37))
+		if(version == KERNEL_VERSION(2,6))
 		{
 			U = buf[y + 0];
 			Y1 = buf[y + 1];

@@ -54,9 +54,8 @@
                              GRALLOC_USAGE_SW_READ_RARELY | \
                              GRALLOC_USAGE_SW_WRITE_NEVER
 
-#ifndef KERNEL_VERSION
-#define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
-#endif
+
+#define KERNEL_VERSION(a,b) (((a) << 16) + ((b) << 8) )
 #define MAX_STR_LEN 35
 
 #include <cutils/properties.h>
@@ -116,9 +115,9 @@ CameraHardware::CameraHardware()
 	version = get_kernel_version();
 	if(version <= 0)
 		ALOGE("Failed to parse kernel version\n");
-	if(version >= KERNEL_VERSION(2,6,37))
+	if(version == KERNEL_VERSION(2,6))
 	{
-		ALOGE("version >= KERNEL_VERSION(2,6,37)");
+		ALOGE("version == KERNEL_VERSION(2,6)");
 		mCamera->Open(VIDEO_DEVICE_2);
 		mCamera->Open_media_device(MEDIA_DEVICE);
 	}
@@ -199,7 +198,7 @@ int CameraHardware::get_kernel_version()
 		ALOGE("Failed to read kernel version numbers\n");
 		goto ret;
 	}
-	ver = KERNEL_VERSION(major, minor, rev);
+	ver = KERNEL_VERSION(major, minor);
 ret:
 	free(verstring);
 	free(dummy);
@@ -412,7 +411,7 @@ status_t CameraHardware::startPreview()
         mCamera = new V4L2Camera();
     }
 
-    if(version >= KERNEL_VERSION(2,6,37)) {
+    if(version == KERNEL_VERSION(2,6)) {
         if (mCamera->Open(VIDEO_DEVICE_2) < 0)
             return INVALID_OPERATION;
     } else {
@@ -618,7 +617,7 @@ int CameraHardware::pictureThread()
      int width, height;
      mParameters.getPictureSize(&width, &height);
 
-     if(version >= KERNEL_VERSION(2,6,37)) {
+     if(version == KERNEL_VERSION(2,6)) {
          if (mCamera->Open(VIDEO_DEVICE_2) < 0)
              return INVALID_OPERATION;
      } else {
