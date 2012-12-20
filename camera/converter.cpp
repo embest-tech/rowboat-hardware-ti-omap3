@@ -159,15 +159,15 @@ yuyv422_to_yuv420sp(unsigned char *bufsrc, unsigned char *bufdest, int width, in
     ptrsrcy3  = bufsrc + (width<<1)*2 ;
     ptrsrcy4  = bufsrc + (width<<1)*3 ;
 
-    ptrsrccb1 = bufsrc + 1;
-    ptrsrccb2 = bufsrc + (width<<1) + 1;
-    ptrsrccb3 = bufsrc + (width<<1)*2 + 1;
-    ptrsrccb4 = bufsrc + (width<<1)*3 + 1;
+    ptrsrccb1 = bufsrc + 3;
+    ptrsrccb2 = bufsrc + (width<<1) + 3;
+    ptrsrccb3 = bufsrc + (width<<1)*2 + 3;
+    ptrsrccb4 = bufsrc + (width<<1)*3 + 3;
 
-    ptrsrccr1 = bufsrc + 3;
-    ptrsrccr2 = bufsrc + (width<<1) + 3;
-    ptrsrccr3 = bufsrc + (width<<1)*2 + 3;
-    ptrsrccr4 = bufsrc + (width<<1)*3 + 3;
+    ptrsrccr1 = bufsrc + 1;
+    ptrsrccr2 = bufsrc + (width<<1) + 1;
+    ptrsrccr3 = bufsrc + (width<<1)*2 + 1;
+    ptrsrccr4 = bufsrc + (width<<1)*3 + 1;
 
     srcystride  = (width<<1)*3;
     srcccstride = (width<<1)*3;

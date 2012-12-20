@@ -17,6 +17,7 @@
 */
 
 #define LOG_TAG "CameraHardware"
+#define LOG_NDEBUG 0
 #include <utils/Log.h>
 
 #include "CameraHardware.h"
@@ -77,11 +78,11 @@ const supported_resolution CameraHardware::supportedPreviewRes[] = {{256, 256} }
 #else
 
 #ifdef _USE_USB_CAMERA_
-const char CameraHardware::supportedPictureSizes [] = "320x240";
-const char CameraHardware::supportedPreviewSizes [] = "320x240";
+const char CameraHardware::supportedPictureSizes [] = "320x240,352x288";
+const char CameraHardware::supportedPreviewSizes [] = "320x240,352x288";
 
-const supported_resolution CameraHardware::supportedPictureRes[] = {{320, 240} };
-const supported_resolution CameraHardware::supportedPreviewRes[] = {{320, 240}};
+const supported_resolution CameraHardware::supportedPictureRes[] = {{320, 240},{352,288} };
+const supported_resolution CameraHardware::supportedPreviewRes[] = {{320, 240},{352,288}};
 #else
 const char CameraHardware::supportedPictureSizes [] = "640x480,352x288,320x240";
 const char CameraHardware::supportedPreviewSizes [] = "640x480,352x288,320x240";
@@ -104,7 +105,8 @@ CameraHardware::CameraHardware()
                     mDataCbTimestamp(0),
                     mCallbackCookie(0),
                     mMsgEnabled(0),
-                    previewStopped(true)
+                    previewStopped(true),
+                    mRecordingEnabled(false)
 {
 	/* create camera */
 	mCamera = new V4L2Camera();
@@ -135,6 +137,9 @@ CameraHardware::CameraHardware()
     property_get("debug.camera.showfps", value, "0");
     mDebugFps = atoi(value);
     LOGD_IF(mDebugFps, "showfps enabled");
+    mRecordBuffer = NULL;
+    mPictureBuffer = NULL;
+
 }
 
 void CameraHardware::initDefaultParameters()
@@ -155,6 +160,8 @@ void CameraHardware::initDefaultParameters()
 	p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_SIZES, CameraHardware::supportedPreviewSizes);
 	p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FORMATS, CameraParameters::PIXEL_FORMAT_YUV422SP);
 	p.set(CameraParameters::KEY_VIDEO_FRAME_FORMAT, CameraParameters::PIXEL_FORMAT_YUV420SP);
+	p.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FRAME_RATES,"20");
+
     p.set(CameraParameters::KEY_FOCUS_MODE,0);
 
     if (setParameters(p) != NO_ERROR) {
@@ -284,7 +291,6 @@ void CameraHardware::enableMsgType(int32_t msgType)
 void CameraHardware::disableMsgType(int32_t msgType)
 {
 	LOGD("disableMsgType:%d",msgType);
-    Mutex::Autolock lock(mLock);
     mMsgEnabled &= ~msgType;
 }
 
@@ -345,8 +351,7 @@ int CameraHardware::previewThread()
     IMG_native_handle_t* handle;
     int stride;
     mParameters.getPreviewSize(&width, &height);
-    int framesize= width * height * 1.5 ; //yuv420sp
-
+    int framesize= width * height * 2 ; //yuv420sp
 
     if (!previewStopped) {
 
@@ -375,27 +380,29 @@ int CameraHardware::previewThread()
 
                 mNativeWindow->enqueue_buffer(mNativeWindow,(buffer_handle_t*) hndl2hndl);
 
-                if ((mMsgEnabled & CAMERA_MSG_PREVIEW_FRAME) ||
-                    (mMsgEnabled & CAMERA_MSG_VIDEO_FRAME)) {
+                if (mMsgEnabled & CAMERA_MSG_PREVIEW_FRAME)
+		{
+                    convertYUYVtoRGB565((unsigned char *)tempbuf, (unsigned char*)mPictureBuffer->data, width, height);
+                    mDataCb(CAMERA_MSG_PREVIEW_FRAME,mPictureBuffer,0,NULL,mCallbackCookie);
 
-                    camera_memory_t* picture = mRequestMemory(-1, framesize, 1, NULL);
-                    convertYUYVtoRGB565((unsigned char *)tempbuf, (unsigned char*)picture->data, width, height);
+		}
+		mCamera->ReleasePreviewFrame();
 
                     if ((mMsgEnabled & CAMERA_MSG_VIDEO_FRAME ) &&
                          mRecordingEnabled ) {
+			mRecordingLock.lock();
+			mCamera->GrabRawFrame(mRawHeap->base(), width, height);
+			yuyv422_to_yuv420sp((unsigned char*) mRawHeap->base(), (unsigned char*) mRecordBuffer->data, width, height);
                         nsecs_t timeStamp = systemTime(SYSTEM_TIME_MONOTONIC);
-                        //mTimestampFn(timeStamp, CAMERA_MSG_VIDEO_FRAME,mRecordBuffer, mUser);
+                        mDataCbTimestamp(timeStamp, CAMERA_MSG_VIDEO_FRAME,mRecordBuffer,0, mCallbackCookie);
+			mRecordingLock.unlock();
                     }
-                    mDataCb(CAMERA_MSG_PREVIEW_FRAME,picture,0,NULL,mCallbackCookie);
 		}
 
-                mCamera->ReleasePreviewFrame();
             }
 
-        }
         mLock.unlock();
     }
-
     return NO_ERROR;
 }
 
@@ -453,6 +460,16 @@ status_t CameraHardware::startPreview()
         mHeap.clear();
     }
 
+    if (mPictureBuffer != NULL)
+    {
+        mPictureBuffer->release(mPictureBuffer);
+        mPictureBuffer = NULL;
+    }
+    if (mRecordBuffer != NULL)
+    {
+        mRecordBuffer->release(mRecordBuffer);
+	mRecordBuffer = NULL;
+    }
     mPreviewFrameSize = mPreviewWidth * mPreviewHeight * 2;
     mHeapSize = (mPreviewWidth * mPreviewHeight * 3) >> 1;
 
@@ -466,6 +483,8 @@ status_t CameraHardware::startPreview()
     mRawHeap = new MemoryHeapBase(mPreviewFrameSize);
     mRawBuffer = new MemoryBase(mRawHeap, 0, mPreviewFrameSize);
 
+    mPictureBuffer = mRequestMemory(-1, mPreviewFrameSize, 1, NULL);
+    mRecordBuffer = mRequestMemory(-1,  mPreviewWidth * mPreviewHeight *1.5, 1, NULL);
     ret = mCamera->BufferMap();
     if (ret) {
         LOGE("Camera Init fail: %s", strerror(errno));
@@ -542,7 +561,7 @@ void CameraHardware::stopRecording()
 
 bool CameraHardware::recordingEnabled()
 {
-    return mRecordingEnabled == true;
+    return mRecordingEnabled;
 }
 
 void CameraHardware::releaseRecordingFrame(const void* opaque)

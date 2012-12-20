@@ -174,6 +174,8 @@ private:
 
     bool                previewStopped;
     bool                mRecordingEnabled;
+   camera_memory_t* mRecordBuffer ;
+   camera_memory_t* mPictureBuffer ;
 };
 
 }; // namespace android
