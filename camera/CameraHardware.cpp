@@ -117,7 +117,7 @@ CameraHardware::CameraHardware()
 	version = get_kernel_version();
 	if(version <= 0)
 		LOGE("Failed to parse kernel version\n");
-	if(version >= KERNEL_VERSION(2,6,37))
+	if(version >= KERNEL_VERSION(2,6))
 	{
 		LOGE("version >= KERNEL_VERSION(2,6,37)");
 		mCamera->Open(VIDEO_DEVICE_2);
